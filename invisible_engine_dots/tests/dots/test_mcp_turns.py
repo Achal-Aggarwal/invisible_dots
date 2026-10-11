@@ -11,6 +11,7 @@ from fakes.fake_tool_server import INSTRUCTIONS, install_fake_tool_server
 from fakes.scripted_provider import call, calls, says
 from fakes.turn_harness import Harness
 
+from nanobot.dots import store as s
 from nanobot.dots.conversations import CONVERSATIONS_DIR
 from nanobot.dots.permissions import mcp_server_of_tool, offered_mcp_servers, tool_permission
 from nanobot.dots.projection import project
@@ -159,3 +160,67 @@ async def test_a_servers_secret_never_reaches_the_conversation_files(make_harnes
     written = "".join(path.read_text(encoding="utf-8") for path in (tmp_path / CONVERSATIONS_DIR.lstrip("/")).rglob("*.md"))
     assert "tok-SECRET-9" not in written and "***" in written
     await h.mcp_servers.aclose()
+
+
+def _store_config(h: Harness) -> None:
+    """What the engine does with every config the host pushes: it keeps it, and the tool reads the servers from it."""
+    stored = h.config.model_dump(mode="json", exclude_unset=True)  # type: ignore[union-attr]
+    h.store.write(lambda conn: s.write_kv(conn, s.KV_RUNTIME_CONFIG, stored))
+
+
+async def test_adding_a_server_asks_the_person_with_the_whole_entry(make_harness: MakeHarness) -> None:
+    arguments = {"name": "clock", "command": "uvx", "args": ["mcp-server-time"], "reason": "to tell the time"}
+    h = make_harness([calls(call("c1", "add_mcp_server", **arguments))], {"mcp.servers.add": "ask"})
+    _store_config(h)
+    h.accept("in1")
+
+    outcome = await h.run(chat_unit())
+
+    assert outcome.kind == "parked"
+    (asked,) = h.events_of("approval.requested")
+    assert (asked["tool"], asked["permission"], asked["arguments"]) == ("add_mcp_server", "mcp.servers.add", arguments)
+    assert h.events_of("mcp.server.added") == []
+
+
+async def test_an_allowed_add_hands_the_host_the_calls_arguments(make_harness: MakeHarness) -> None:
+    arguments = {"name": "search", "url": "https://search.example/mcp", "secrets": ["Authorization"], "reason": "search"}
+    h = make_harness([calls(call("c1", "add_mcp_server", **arguments)), says("asked")], {"mcp.servers.add": "allow"})
+    _store_config(h)
+    h.accept("in1")
+
+    await h.run(chat_unit())
+
+    assert h.events_of("mcp.server.added") == [{"arguments": arguments}]
+    result = next(m for m in h.messages() if m["role"] == "tool")["content"]
+    assert 'Asked to add the MCP server "search"' in result and "mcp_search_<tool>" in result
+    assert h.events_of("tool.called")[0]["target"] == "search: https://search.example/mcp"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "problem"),
+    [
+        ({"name": "Bad_Name", "command": "uvx"}, "lowercase letters"),
+        ({"name": "taken", "command": "uvx"}, "already has an MCP server"),
+        ({"name": "both", "command": "uvx", "url": "https://a.example/mcp"}, "not both"),
+        ({"name": "none"}, "not both"),
+        ({"name": "web", "url": "https://user:pw@a.example/mcp"}, "user or a password"),
+        ({"name": "web", "url": "ftp://a.example/mcp"}, "http or https"),
+        ({"name": "web", "url": "https://a.example/mcp", "env": {"A": "b"}}, "go with command"),
+    ],
+)
+async def test_an_add_the_host_could_not_take_is_refused_at_once_and_reaches_no_one(
+    make_harness: MakeHarness, tmp_path: Path, arguments: dict[str, Any], problem: str
+) -> None:
+    h = make_harness(
+        [calls(call("c1", "add_mcp_server", **arguments, reason="r")), says("ok")],
+        {"mcp.servers.add": "allow", "mcp.taken": "deny"},
+        mcp_servers={"taken": server(tmp_path)},
+    )
+    _store_config(h)
+    h.accept("in1")
+
+    await h.run(chat_unit())
+
+    result = next(m for m in h.messages() if m["role"] == "tool")["content"]
+    assert problem in result
+    assert h.events_of("mcp.server.added") == []

@@ -252,6 +252,16 @@ export type McpServerConfig = z.output<typeof mcpServer>;
 export type McpStdioServerConfig = z.output<typeof mcpStdioServer>;
 export type McpHttpServerConfig = z.output<typeof mcpHttpServer>;
 
+/**
+ * One MCP server's entry as the config would hold it, with its defaults, or why it is not one: what the host checks of
+ * a server the Dot asks to add (`mcp.server.added`) before it writes it into the config.
+ */
+export function parseMcpServerEntry(value: unknown): { ok: true; server: McpServerConfig } | { ok: false; problem: string } {
+  const result = mcpServer.safeParse(value);
+  if (result.success) return { ok: true, server: result.data };
+  return { ok: false, problem: result.error.issues.map((issue) => `${issue.path.join(".") || "entry"}: ${issue.message}`).join("; ") };
+}
+
 export function isMcpStdioServer(server: McpServerConfig): server is McpStdioServerConfig {
   return "command" in server;
 }
@@ -486,7 +496,7 @@ export function resolvePermission(
   return config.permissions[permission] ?? defaultPermission(permission as PermissionName);
 }
 
-const ASK_BY_DEFAULT: ReadonlySet<Permission> = new Set<Permission>(["browser.identity.delete", "automations"]);
+const ASK_BY_DEFAULT: ReadonlySet<Permission> = new Set<Permission>(["browser.identity.delete", "automations", "mcp.servers.add"]);
 const ALLOWED_NAMESPACES: ReadonlySet<string> = new Set(["computer", "files", "browser"]);
 
 /** What a permission is when the config says nothing of it: the decision `resolvePermission` falls back to. */

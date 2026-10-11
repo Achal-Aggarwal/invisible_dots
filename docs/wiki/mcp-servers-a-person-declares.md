@@ -1,6 +1,6 @@
 ---
 title: "MCP servers a person declares"
-description: "A Dot uses the MCP servers its person declares, each behind its own permission, run as the Dot's user, with secrets kept out of the config. A live Dot installed Node.js for one and used it at the next message."
+description: "A Dot uses the MCP servers its person declares or approves, each behind its own permission, run as the Dot's user, with secrets kept out of the config; how NanoClaw, Hermes, OpenClaw and others let an agent add one."
 parent: "Studies"
 nav_order: 8
 ---
@@ -23,13 +23,34 @@ All three have the person declare a server, offer its tools as
 `<prefix><server><separator><tool>`, and start it as a child process of the
 host or reach it by URL.
 
+The agents that live on a computer of their own are closer to a Dot, and they
+differ on whether the agent may add a server itself (their source, October 2026):
+
+| Host | The agent adds a server | Who approves | Usable | Secrets |
+|---|---|---|---|---|
+| NanoClaw | yes, `add_mcp_server` (any command or URL) | always an admin, on an approval card | after its container restarts | never in the agent: a credential gateway injects them |
+| Hermes Agent | from a curated catalog only, `manage_connections` | a card; with no card, nobody | at once | entered on the card |
+| OpenClaw | no; a plugin from the official catalog may bring one (owner-only) | the owner | at the next step | env, secret references, OAuth |
+| nanobot | no | the person activates it | after a reload | `${VAR}`, OAuth |
+| Goose | enables only extensions already configured | an allowlist | at once | its config |
+
+Hermes also shows what goes wrong: in June 2026 entries planted in its
+`config.yaml` ran shell scripts that installed SSH keys, and it now refuses
+entries of that shape.
+
 ## What a Dot does
 
-- **The person declares a server; the Dot installs what it needs.** A server is
+- **The person declares a server, or approves one the Dot adds.** A server is
   a `command` (with `args` and `env`) or a `url` (with `headers`), in the Dot's
-  settings or YAML. The Dot cannot add one to its own config, which would let
-  it give itself tools; it can install a server's program, as it installs
-  anything.
+  settings or YAML. The Dot installs its program as it installs anything (from
+  GitHub with `uv tool install git+https://...`, from npm once it installed
+  Node.js), then asks with `add_mcp_server`, as NanoClaw's agents do, under the
+  permission `mcp.servers.add`, which asks by default. The person reads the
+  whole entry on the approval: what it runs or where it is, the secrets they will
+  set, and why. The host checks that approval again before it writes the server,
+  and the server starts at once, with no restart. A stdio server runs as the
+  Dot's user, with what running a command already gives it, so what the Dot gains
+  are tools, each still asking. Only the person changes or removes a server.
 - **One permission per server**, `mcp.<server>`, asked by default and weighed
   as high a risk as running commands: what a server's tools do is the server's
   to say.

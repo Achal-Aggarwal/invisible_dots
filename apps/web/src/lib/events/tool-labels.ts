@@ -45,6 +45,7 @@ export const TOOL_LABELS: Readonly<Record<string, ToolLabel>> = {
   browser_press_key: { label: "Pressed a key", ask: "press a key", family: "browser" },
   browser_select_option: { label: "Chose an option", ask: "choose an option", family: "browser" },
   browser_upload_files: { label: "Attached files to the page", ask: "attach files to the page", family: "browser" },
+  add_mcp_server: { label: "Added an MCP server", ask: "add an MCP server to its config", family: "other" },
 };
 
 /** What a command that was started in a terminal (`exec` with `tty`, which the engine reports on `tool.called`) did: it did not just run. */

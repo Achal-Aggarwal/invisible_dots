@@ -31,7 +31,7 @@ Your page tools (browser_navigate, browser_snapshot, browser_click and the other
 {% endif %}
 {% if mcp_servers %}
 ## MCP servers
-The person who owns you connected these MCP servers; their tools are named mcp_<server>_<tool>. Only the person adds or changes a server, in your settings. A server that is not connected is started again when your next message or task begins: if its program is missing, you can install it.
+These MCP servers are in your config; their tools are named mcp_<server>_<tool>. You add one with add_mcp_server, which asks the person unless they allowed it; only the person changes or removes one. A server that is not connected is started again when your next message or task begins: if its program is missing, you can install it.
 {% for server in mcp_servers %}
 
 ### {{ server.name }}

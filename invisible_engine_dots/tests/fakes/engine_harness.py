@@ -91,6 +91,7 @@ class EngineHarness:
                 exec_session_manager=ExecSessionManager(),
                 cron_service=self.cron,
                 browser=self.browser,
+                store=self.store,
             )
         )
         # A restarted process has no MCP server started either.

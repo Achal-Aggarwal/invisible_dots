@@ -76,6 +76,7 @@ OUTBOUND_EVENT_TYPES = (
     "browser.identity.closed",
     "automation.next_run",
     "memory.updated",
+    "mcp.server.added",
 )
 
 AGENT_STATES = (
@@ -360,7 +361,9 @@ class DotRuntimeConfig(_Open):
     @model_validator(mode="after")
     def _server_permissions_are_of_declared_servers(self) -> DotRuntimeConfig:
         for permission in self.permissions:
-            if permission.startswith("mcp.") and permission[len("mcp.") :] not in self.mcp_servers:
+            # A server's name has no `.`, so `mcp.servers.add` (adding one) is never a server's permission.
+            server = permission[len("mcp.") :] if permission.startswith("mcp.") else None
+            if server is not None and re.fullmatch(MCP_SERVER_NAME_PATTERN, server) and server not in self.mcp_servers:
                 raise ValueError(f'"{permission}" is the permission of an MCP server the config does not declare')
         return self
 

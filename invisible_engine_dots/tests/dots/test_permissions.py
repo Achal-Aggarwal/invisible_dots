@@ -46,6 +46,7 @@ def test_every_tool_maps_to_the_permission_of_the_design() -> None:
         "browser_press_key": "browser.act",
         "browser_select_option": "browser.act",
         "browser_upload_files": "browser.act",
+        "add_mcp_server": "mcp.servers.add",
     }
 
 
@@ -136,6 +137,7 @@ def _deps(tmp_path, store):
         exec_session_manager=ExecSessionManager(),
         cron_service=CronService(tmp_path / "cron" / "jobs.json"),
         browser=make_browser_manager(tmp_path, store, computer),
+        store=store,
     )
 
 
@@ -388,6 +390,13 @@ def test_a_browser_call_names_its_identity_and_what_it_acted_on() -> None:
     assert tool_target("browser_identity_create", {"name": "Shopping", "proxy": "http://u:pw@h:1"}) == "Shopping"
     assert tool_target("browser_identity_list", {}) is None
     assert tool_target("computer_screenshot", {}) is None
+
+
+def test_a_server_the_dot_adds_is_named_with_what_it_runs_or_reaches() -> None:
+    assert tool_target("add_mcp_server", {"name": "time", "command": "uvx", "args": ["mcp-server-time"]}) == "time: uvx mcp-server-time"
+    assert tool_target("add_mcp_server", {"name": "web", "url": "https://u:pw@w.example/mcp"}) == "web: https://w.example/mcp"
+    assert tool_target("add_mcp_server", {"name": "bare"}) == "bare"
+    assert offered_tools({"mcp.servers.add": "ask"}) == ["add_mcp_server"]
 
 
 def test_what_a_person_types_into_a_browser_is_never_a_target() -> None:

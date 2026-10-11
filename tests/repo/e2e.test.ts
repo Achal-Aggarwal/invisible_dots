@@ -146,7 +146,9 @@ describe("the e2e run's contract with the product", () => {
     ].map((m) => m[1]!);
     expect(tools.length).toBeGreaterThan(10);
     // A tool of an MCP server is the server's, not the table's: its server is one the run declares (`mcpServers`).
-    const declared = (server: string) => new RegExp(`mcpServers: \\{[^}]*\\b${server}\\b`).test(run);
+    // Declared in the config the run writes, or one the run has the Dot add itself with add_mcp_server.
+    const declared = (server: string) =>
+      new RegExp(`mcpServers: \\{[^}]*\\b${server}\\b`).test(run) || new RegExp(`MCP server named ${server} to your config with the add_mcp_server tool`).test(run);
     for (const tool of tools) {
       const server = /^mcp_([a-z0-9-]+)_/.exec(tool)?.[1];
       if (server !== undefined) expect(declared(server), `run.ts names ${tool} of an MCP server it does not declare`).toBe(true);

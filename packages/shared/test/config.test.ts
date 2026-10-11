@@ -318,7 +318,7 @@ describe("resolvePermission", () => {
   const defaults = parseDotConfig(MINIMAL);
 
   it("allows every known permission by default except those that act beyond the Dot's computer", () => {
-    const asks = new Set(["browser.identity.delete", "automations"]);
+    const asks = new Set(["browser.identity.delete", "automations", "mcp.servers.add"]);
     for (const permission of PERMISSIONS) {
       expect(resolvePermission(defaults, permission)).toBe(asks.has(permission) ? "ask" : "allow");
     }

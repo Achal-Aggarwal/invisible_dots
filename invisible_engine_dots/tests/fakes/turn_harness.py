@@ -96,6 +96,7 @@ class Harness:
                 exec_session_manager=ExecSessionManager(),
                 cron_service=CronService(tmp_path / "cron" / "jobs.json"),
                 browser=self.browser,
+                store=store,
             )
         )
         self.mcp_secrets = McpSecrets()

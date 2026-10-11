@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
     from nanobot.dots.browser import BrowserManager
     from nanobot.dots.computer import Computer
+    from nanobot.dots.store import DotStore
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class ToolDeps:
     exec_session_manager: ExecSessionManager
     cron_service: CronService
     browser: BrowserManager
+    store: DotStore
 
 
 @dataclass(frozen=True)
@@ -175,6 +177,12 @@ def _build_page_tool(name: str) -> Callable[[ToolDeps], Tool]:
     return build
 
 
+def _build_add_mcp_server(deps: ToolDeps) -> Tool:
+    from nanobot.dots.mcp_servers import AddMcpServerTool
+
+    return AddMcpServerTool(deps.store)
+
+
 def _build_computer_screenshot(deps: ToolDeps) -> Tool:
     from nanobot.dots.browser_tools import ComputerScreenshotTool
 
@@ -214,6 +222,8 @@ TOOL_PERMISSIONS: Mapping[str, ToolEntry] = MappingProxyType(
         "browser_select_option": ToolEntry("browser.act", _build_page_tool("browser_select_option"), targets.browser_selector_target),
         # Attaches files of the dot user, the ones its commands can read, to a file field of the page.
         "browser_upload_files": ToolEntry("browser.act", _build_page_tool("browser_upload_files"), targets.browser_selector_target),
+        # Asks the host to add an MCP server to the Dot's config; the host checks the permission again and writes it.
+        "add_mcp_server": ToolEntry("mcp.servers.add", _build_add_mcp_server, targets.add_mcp_server_target),
     }
 )
 

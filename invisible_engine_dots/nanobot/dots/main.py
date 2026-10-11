@@ -147,7 +147,7 @@ async def serve(environment: Environment, stop: asyncio.Event) -> None:
             max_open=DEFAULT_MAX_OPEN,
             max_identities=DEFAULT_MAX_IDENTITIES,
         )
-        registry = build_registry(ToolDeps(computer, exec_sessions, cron, browser))
+        registry = build_registry(ToolDeps(computer, exec_sessions, cron, browser, store))
         # The MCP servers the person declares: their tools join the registry while they are connected.
         mcp_servers = McpServers(computer=computer, registry=registry, secrets=mcp_secrets)
         engine = Engine(

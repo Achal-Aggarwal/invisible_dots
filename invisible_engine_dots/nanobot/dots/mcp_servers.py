@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections.abc import Collection, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -41,8 +42,10 @@ from nanobot.dots.computer import Computer
 from nanobot.dots.conversations import redact
 from nanobot.dots.images import show_images
 from nanobot.dots.permissions import mcp_permission
-from nanobot.dots.protocol import McpServerSpec, McpStdioServer
+from nanobot.dots import store as dots_store
+from nanobot.dots.protocol import MCP_SERVER_NAME_PATTERN, McpServerSpec, McpStdioServer, parse_runtime_config
 from nanobot.dots.secrets import McpSecrets
+from nanobot.dots.store import DotStore
 
 # The most of a server's instructions the prompt carries, as Claude Code caps them.
 INSTRUCTIONS_MAX_CHARS = 2048
@@ -138,6 +141,83 @@ class McpServerTool(Tool):
             return result
         text, images = split_result(result)
         return show_images(text, images, f"{self._name}")
+
+
+class AddMcpServerTool(Tool):
+    """`add_mcp_server`: the Dot adds an MCP server to its own config, as NanoClaw's `add_mcp_server` does.
+
+    The config is the host's: the tool checks what it can at once (a name that is free, a command or a URL), and writes
+    `mcp.server.added` with the call's arguments; the host checks again that the permission allows it or that the
+    person approved exactly these arguments, checks the entry with the config's schema, writes it and pushes the config,
+    and the server then starts as any declared one. A server's secrets are named here and set by the person, never
+    passed: a value written in env, headers, args or the URL would sit in the config for anyone to read.
+    """
+
+    def __init__(self, store: DotStore) -> None:
+        self._store = store
+
+    @property
+    def name(self) -> str:
+        return "add_mcp_server"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Add an MCP server to your own config, so its tools become yours: a program on your computer (command, "
+            "args, env) or a URL (url, headers). Install its program first if it needs one (from PyPI or GitHub with "
+            "uvx or `uv tool install git+https://...`, from npm with npx after `sudo dot-install nodejs npm`). The "
+            "person is asked first, unless they allowed this. Its tools are named mcp_<name>_<tool>, arrive at your "
+            "next message or task, and each asks the person until they allow it. Name a key or token in secrets "
+            "(an environment variable, or a header such as Authorization) and the person sets its value; never write "
+            "one in env, headers, args or the URL."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        strings = {"type": "array", "items": {"type": "string"}}
+        mapping = {"type": "object", "additionalProperties": {"type": "string"}}
+        return {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "1 to 32 lowercase letters, digits and '-', starting with a letter or a digit."},
+                "command": {"type": "string", "description": "The program that serves MCP over stdio, run as you in your home."},
+                "args": {**strings, "description": "Its arguments."},
+                "env": {**mapping, "description": "Environment variables that are not secrets."},
+                "url": {"type": "string", "description": "An MCP server reached over HTTPS (streamable HTTP, or SSE for a URL ending in /sse)."},
+                "headers": {**mapping, "description": "Headers that are not secrets."},
+                "secrets": {**strings, "description": "Names of environment variables (command) or headers (url) whose values the person sets."},
+                "reason": {"type": "string", "description": "Why you need it, in one line, for the person who approves it."},
+            },
+            "required": ["name", "reason"],
+            "additionalProperties": False,
+        }
+
+    def _declared(self) -> set[str]:
+        stored = self._store.read(lambda conn: dots_store.read_kv(conn, dots_store.KV_RUNTIME_CONFIG))
+        return set(parse_runtime_config(stored).mcp_servers) if stored is not None else set()
+
+    async def execute(self, **arguments: Any) -> Any:
+        name = arguments.get("name")
+        if not isinstance(name, str) or re.fullmatch(MCP_SERVER_NAME_PATTERN, name) is None:
+            return ToolResult.error("name must be 1 to 32 lowercase letters, digits and '-', starting with a letter or a digit")
+        if name in self._declared():
+            return ToolResult.error(f'your config already has an MCP server "{name}"; the person changes or removes one')
+        command, url = arguments.get("command"), arguments.get("url")
+        if bool(command) == bool(url):
+            return ToolResult.error("give either command (a program) or url (a server over HTTP), not both")
+        if command is None and (arguments.get("args") or arguments.get("env")):
+            return ToolResult.error("args and env go with command")
+        if url is not None:
+            if not re.match(r"(?i)^https?://", str(url)):
+                return ToolResult.error("url must be an http or https URL")
+            if "@" in str(url).split("://", 1)[1].split("/", 1)[0]:
+                return ToolResult.error("url must not hold a user or a password: name the header in secrets instead")
+        self._store.write(lambda conn: dots_store.append_outbox(conn, "mcp.server.added", {"arguments": dict(arguments)}))
+        return (
+            f'Asked to add the MCP server "{name}" to your config. The host writes it and it starts at once; its tools '
+            f"are yours from your next message or task, named mcp_{name}_<tool>. If it names secrets, the person sets "
+            "them in your settings, and until then it says which is missing."
+        )
 
 
 @dataclass

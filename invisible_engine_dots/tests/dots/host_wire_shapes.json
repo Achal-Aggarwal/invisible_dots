@@ -27,7 +27,8 @@
           "browser.navigate": "allow",
           "browser.read": "allow",
           "browser.act": "allow",
-          "automations": "ask"
+          "automations": "ask",
+          "mcp.servers.add": "ask"
         }
       }
     },
@@ -89,6 +90,7 @@
           "browser.read": "allow",
           "browser.act": "allow",
           "automations": "ask",
+          "mcp.servers.add": "ask",
           "mcp.search": "ask",
           "mcp.time": "allow"
         },

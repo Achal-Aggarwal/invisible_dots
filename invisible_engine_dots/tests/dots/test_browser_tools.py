@@ -63,7 +63,7 @@ class Env:
         self.computer = LocalComputer(tmp_path / "computer")
         self.manager: BrowserManager = make_browser_manager(tmp_path, store, self.computer, **limits)
         self.registry: ToolRegistry = build_registry(
-            ToolDeps(self.computer, ExecSessionManager(), CronService(tmp_path / "cron" / "jobs.json"), self.manager)
+            ToolDeps(self.computer, ExecSessionManager(), CronService(tmp_path / "cron" / "jobs.json"), self.manager, store)
         )
         self.images = TurnImages()
 

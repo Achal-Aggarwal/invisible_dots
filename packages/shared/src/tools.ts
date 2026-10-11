@@ -20,6 +20,7 @@ export const PERMISSIONS = [
   "browser.read",
   "browser.act",
   "automations",
+  "mcp.servers.add",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -104,12 +105,19 @@ export const PERMISSION_INFO: Record<Permission, PermissionInfo> = {
     description: "Add, list and remove the Dot's own scheduled automations, which keep working after a turn ends.",
     risk: "medium",
   },
+  "mcp.servers.add": {
+    label: "Add MCP servers",
+    description:
+      "Add an MCP server to the Dot's own config (a program it installed, or a URL), whose tools it may then use, each asking under the server's own permission.",
+    risk: "high",
+  },
 };
 
 /**
  * An MCP server the person declares in a Dot's config (`mcp_servers`, section 7) is named by this rule. The name is
  * the prefix of the server's tools as the model sees them, `mcp_<server>_<tool>` (nanobot's naming), and the name
- * of its permission, `mcp.<server>`; it holds no `_` so the server can be read back from a tool's name. The engine
+ * of its permission, `mcp.<server>`; it holds no `_` so the server can be read back from a tool's name, and no `.`,
+ * so `mcp.servers.add`, the permission to add a server, is never a server's. The engine
  * keeps a copy in nanobot/dots/protocol.py, kept equal by tests/repo/vendored-nanobot.test.ts.
  */
 export const MCP_SERVER_NAME_PATTERN = "^[a-z0-9][a-z0-9-]{0,31}$";

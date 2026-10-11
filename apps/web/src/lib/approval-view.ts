@@ -240,10 +240,33 @@ export function approvalBody(ask: ApprovalAsk): ApprovalBody {
       if (files.length > 0) return { kind: "patch", files, dryRun: args.dry_run === true };
       break;
     }
+    case "add_mcp_server":
+      return { kind: "facts", facts: mcpServerFacts(args) };
     default:
       break;
   }
   return { kind: "facts", facts: argumentFacts(args) };
+}
+
+/**
+ * The server a Dot asks to add, as the person must read it before it enters the config: what it runs (or where it
+ * is), with what, which secrets it will ask them for, and why. A value written in env or headers is shown as it is,
+ * since it would sit in the config for anyone to read; the secrets are names, never values.
+ */
+function mcpServerFacts(args: Record<string, unknown>): Fact[] {
+  const pairs = (value: unknown, separator: string) =>
+    typeof value === "object" && value !== null ? Object.entries(value as Record<string, unknown>).map(([k, v]) => `${k}${separator}${text(v)}`).join("\n") : "";
+  const list = (value: unknown) => (Array.isArray(value) ? value.map(text).filter(Boolean) : []);
+  const runs = [text(args.command), ...list(args.args)].filter(Boolean).join(" ");
+  const facts: Fact[] = [
+    { label: "Name", value: text(args.name) },
+    runs !== "" ? { label: "Runs, as the Dot's user", value: runs } : { label: "URL", value: text(args.url) },
+    { label: "Environment", value: pairs(args.env, "=") },
+    { label: "Headers", value: pairs(args.headers, ": ") },
+    { label: "Secrets you will set", value: list(args.secrets).join(", ") },
+    { label: "Why", value: text(args.reason) },
+  ];
+  return facts.filter((fact) => fact.value !== "");
 }
 
 /**

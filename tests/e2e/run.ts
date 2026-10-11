@@ -948,7 +948,29 @@ async function main(): Promise<void> {
     const seen = `[${MCP_SECRET[0]}]${MCP_SECRET.slice(1)}`;
     const cmdlines = await guestExec(dotId, `cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0' ' ' | grep -c '${seen}' || true`);
     assert(cmdlines.stdout.trim() === "0", "the secret is on a command line");
-    return `time connected with ${server.tools} tools, its tool asked under mcp.time and ran once always allowed (${String(call.data.target ?? "no target")}); keyed waited for TIME_TOKEN, then connected with ${started.tools} tools once it was set through the CLI; the secret is in its environment and on no command line`;
+
+    // The Dot adds a server itself: it asks (mcp.servers.add), the person approves the whole entry, and the host writes it.
+    const adding = await queueTask(
+      'Add an MCP server named clock to your config with the add_mcp_server tool: command uvx, args ["mcp-server-time"], ' +
+        'reason "to tell the time". Then answer with only DONE.',
+    );
+    const asked = await waitApproval(adding.id, "add_mcp_server");
+    assert(asked.permission === "mcp.servers.add", `the add asks under ${asked.permission}`);
+    assert(asked.arguments.name === "clock" && asked.arguments.command === "uvx", `the approval shows ${JSON.stringify(asked.arguments)}`);
+    await approve(asked.id);
+    await waitTask(adding.id);
+    const added = await waitFor("the clock server in the config and connected", 3 * MINUTE, async () => {
+      const dot = await api<{ config: { mcp_servers: Record<string, unknown>; permissions: Record<string, string> } }>("GET", route(ROUTES.dot, { id: dotId }));
+      if (!("clock" in dot.config.mcp_servers)) return undefined;
+      assert(!("mcp.clock" in dot.config.permissions), "the added server's permission is not left to ask");
+      return (await api<ToolTable>("GET", tableRoute)).mcp_servers.find((s) => s.name === "clock" && s.state === "connected");
+    }, 3000);
+    assert((await events(dotId)).some((e) => e.type === "mcp.server.added"), "no mcp.server.added event");
+    return (
+      `time connected with ${server.tools} tools, its tool asked under mcp.time and ran once always allowed (${String(call.data.target ?? "no target")}); ` +
+      `keyed waited for TIME_TOKEN, then connected with ${started.tools} tools once it was set through the CLI; the secret is in its environment and on no command line; ` +
+      `the Dot added clock itself, approved, and it connected with ${added.tools} tools`
+    );
   });
 
   await step("n", "the key and the MCP secret are in none of the Dot's own files and rows", async () => {

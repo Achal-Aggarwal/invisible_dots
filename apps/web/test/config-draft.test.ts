@@ -53,7 +53,7 @@ describe("the permission rows", () => {
 
   it("are grouped by the first word of the permission, in the order of the permissions", () => {
     const groups = permissionGroups(saved, saved, null);
-    expect(groups.map((g) => g.label)).toEqual(["Commands and desktop", "Files", "Browser", "Automations"]);
+    expect(groups.map((g) => g.label)).toEqual(["Commands and desktop", "Files", "Browser", "Automations", "MCP servers"]);
     expect(groups.find((g) => g.id === "browser")?.rows.map((r) => r.permission)).toEqual([
       "browser.identity.list",
       "browser.identity.create",
