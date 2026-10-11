@@ -1,4 +1,0 @@
-cc: <info@mail.co.uk>
-Write to marco@Example.COM for details.
-cc: <support@acme.io>
-not-an-email@ and @nobody here

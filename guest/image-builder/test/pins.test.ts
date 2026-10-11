@@ -58,6 +58,13 @@ describe("pin validation", () => {
     expect(() => parseGuestPins({ ...good, apt_packages: ["xvfb", "x; rm -rf /"] })).toThrow(/apt_packages\[1\]/);
   });
 
+  it("takes the packages from a pinned snapshot of the archive, and refuses one that is not a snapshot time", () => {
+    expect(GUEST_PINS.apt_snapshot).toMatch(/^\d{8}T\d{6}Z$/);
+    expect(() => parseGuestPins({ ...good, apt_snapshot: "latest" })).toThrow(/apt_snapshot/);
+    const { apt_snapshot: _snapshot, ...unpinned } = good;
+    expect(() => parseGuestPins(unpinned)).toThrow(/apt_snapshot/);
+  });
+
   it("refuses python_packages, which would be a second copy of the lock's versions", () => {
     expect(() => parseGuestPins({ ...good, python_packages: { "invisible-playwright-mcp": "0.70.2" } })).toThrow(/mcp-requirements\.lock/);
   });

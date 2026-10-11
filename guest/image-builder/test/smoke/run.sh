@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The engine smoke's entry point: builds dot-agentd from a source tree in
-# golang:1.26, starts ubuntu:24.04 with the tree mounted, builds the engine's
+# golang:1.26.8, starts ubuntu:24.04 with the tree mounted, builds the engine's
 # environment there as provision.sh does (builder/build-engine-env.sh on the
 # hashed lock), stages the engine's source as the runtime ISO does, and runs
 # the checks of smoke.sh against a Dot.
@@ -78,21 +78,21 @@ fi
 # --init: a process the tests kill is a zombie until its parent reaps it, and the tests ask whether it is gone.
 if ! privileged=$(docker run --rm --init -v "$run_id":/work "${tree_mount[@]}" \
   -e CGO_ENABLED=0 -e GOCACHE=/work/gocache -e GOTOOLCHAIN=local -e GOFLAGS=-buildvcs=false \
-  -w "$tree/guest/dot-agentd" golang:1.26 \
+  -w "$tree/guest/dot-agentd" golang:1.26.8 \
   go test -count=1 -v -tags privileged ./... 2>&1) || printf '%s\n' "$privileged" | grep -q -e '--- SKIP'; then
   printf '%s\n' "$privileged" | grep -v -e '^=== ' | tail -40 >&2
   echo "run.sh: dot-agentd's privileged tests did not pass, or one was skipped" >&2
   exit 1
 fi
 
-# dot-agentd for the guest, as CI's go job builds it. GOTOOLCHAIN=local: the
-# image's Go is the one that builds, nothing is downloaded. -buildvcs=false:
-# the mounted tree belongs to another user, and a build must not depend on git.
+# dot-agentd for the guest, with the one build (guest/dot-agentd/README.md) and the Go
+# go.mod's toolchain names. GOTOOLCHAIN=local: the image's Go is the one that
+# builds, nothing is downloaded.
 docker run --rm -v "$run_id":/work "${tree_mount[@]}" \
   -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
-  -e GOCACHE=/work/gocache -e GOTOOLCHAIN=local -e GOFLAGS=-buildvcs=false \
-  -w "$tree/guest/dot-agentd" golang:1.26 \
-  go build -trimpath -ldflags="-s -w" -o /work/dot-agentd ./cmd/dot-agentd
+  -e GOCACHE=/work/gocache -e GOTOOLCHAIN=local \
+  -w "$tree/guest/dot-agentd" golang:1.26.8 \
+  go build -trimpath -buildvcs=false -ldflags="-s -w" -o /work/dot-agentd ./cmd/dot-agentd
 
 # The checks of the tree under test, in a clean Ubuntu. PIN_REMOVALS reaches
 # smoke.sh only when it is set here (see the top of smoke.sh).

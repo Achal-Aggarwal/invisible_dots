@@ -114,18 +114,15 @@ describe("Needs you", () => {
     await screen.findByText("Nothing needs you");
   });
 
-  it("says that some failed tasks may be missing when a Dot's tasks could not be read", async () => {
+  it("says that failed tasks may be missing when they could not be read", async () => {
     const real = plane.fetch;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input) === "/api/dots/d2/tasks" ? Response.json({ error: "down", message: "down" }, { status: 502 }) : real(input, init))),
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).startsWith("/api/tasks?") ? Response.json({ error: "down", message: "down" }, { status: 502 }) : real(input, init))),
     );
-    plane.tasks = [taskRecord("t1", { dot_id: "d1", description: "Send the digest", status: "FAILED", error: "no", finished_at: hoursAgo(2) })];
     await renderInbox();
-    expect(await screen.findByText("Some failed tasks may be missing")).toBeTruthy();
-    expect(screen.getByText("The tasks of one Dot could not be read.")).toBeTruthy();
-    // What could be read is still there.
-    expect(screen.getByRole("article", { name: "Failed: Send the digest" })).toBeTruthy();
+    expect(await screen.findByText("Failed tasks may be missing")).toBeTruthy();
+    expect(screen.getByText("The tasks that failed today could not be read.")).toBeTruthy();
   });
 
   it("adds the channels that need linking again, with what the host says and the page where it is done", async () => {
@@ -156,17 +153,11 @@ describe("Needs you", () => {
     expect(screen.queryByRole("article", { name: /needs linking again/ })).toBeNull();
   });
 
-  it("says that some channels may be missing when a Dot's channels could not be read", async () => {
-    const real = plane.fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input) === "/api/dots/d2/channels" ? Response.json({ error: "down", message: "down" }, { status: 502 }) : real(input, init))),
-    );
-    plane.channels = { d1: [channelRecord("telegram", { status: "needs_relink" })] };
+  it("says that channels may be missing when they could not be read", async () => {
+    plane.failChannels = { status: 502, error: "down", message: "down" };
     await renderInbox();
-    expect(await screen.findByText("Some channels may be missing")).toBeTruthy();
-    expect(screen.getByText("The channels of one Dot could not be read.")).toBeTruthy();
-    expect(screen.getByRole("article", { name: "Telegram of fares needs linking again" })).toBeTruthy();
+    expect(await screen.findByText("Channels may be missing")).toBeTruthy();
+    expect(screen.getByText("The channels could not be read.")).toBeTruthy();
   });
 
   it("says that nothing needs the person when nothing does, and loads without flashing that before it knows", async () => {
@@ -312,11 +303,13 @@ describe("the keyboard", () => {
     ];
   });
 
+  const approvalList = () => screen.getByRole("list", { name: "Approvals waiting for your answer" });
   const selected = () => screen.queryAllByRole("article").filter((card) => card.getAttribute("aria-current") === "true").map((card) => card.getAttribute("data-approval-id"));
 
   it("selects the first card, moves with j and k and stops at the ends", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     expect(selected()).toEqual(["first"]);
     await userEvent.keyboard("j");
     expect(selected()).toEqual(["second"]);
@@ -331,6 +324,7 @@ describe("the keyboard", () => {
   it("says which card is selected when j or k moves, since the selection is drawn and not focused", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     const spoken = () => screen.getAllByRole("status").map((status) => status.textContent).filter((text) => /\d of \d/.test(text ?? ""));
     expect(spoken()).toEqual([]);
     await userEvent.keyboard("j");
@@ -344,6 +338,7 @@ describe("the keyboard", () => {
   it("allows the selected card once with a, and denies it with d, and moves nowhere by itself", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     await userEvent.keyboard("a");
     await waitFor(() => expect(plane.answers).toEqual([{ id: "first", decision: "approve", body: {} }]));
     await waitFor(() => expect(within(cards()[0]!).getByRole("status").textContent).toBe("Allowed"));
@@ -363,12 +358,14 @@ describe("the keyboard", () => {
   it("sends the note written for the card with an answer made by key", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     await userEvent.click(within(cards()[0]!).getByRole("button", { name: "Add a note for the Dot" }));
     const field = within(cards()[0]!).getByLabelText("Note for the Dot (optional)");
     await userEvent.type(field, "go ahead");
     // The keys typed in the field are text, not shortcuts.
     expect(plane.answers).toEqual([]);
-    (field as HTMLElement).blur();
+    // Back to the list (a click on it): the keys are its own again.
+    await userEvent.click(approvalList());
     await userEvent.keyboard("a");
     await waitFor(() => expect(plane.answers).toEqual([{ id: "first", decision: "approve", body: { note: "go ahead" } }]));
   });
@@ -376,6 +373,7 @@ describe("the keyboard", () => {
   it("does not allow a destructive card by key: it moves the focus to Allow once and says to confirm", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     await userEvent.keyboard("jj");
     expect(selected()).toEqual(["third"]);
     await userEvent.keyboard("a");
@@ -391,6 +389,7 @@ describe("the keyboard", () => {
   it("denies a destructive card at once, since a denial can do no harm", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     await userEvent.keyboard("jj");
     await userEvent.keyboard("d");
     await waitFor(() => expect(plane.answers).toEqual([{ id: "third", decision: "reject", body: {} }]));
@@ -399,6 +398,7 @@ describe("the keyboard", () => {
   it("leaves the keys to a dialog that is open", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     await userEvent.keyboard("jj");
     await userEvent.click(within(cards()[2]!).getByRole("button", { name: "Always allow" }));
     await screen.findByRole("dialog");
@@ -410,6 +410,7 @@ describe("the keyboard", () => {
   it("ignores a key with a modifier, and does nothing when no card waits", async () => {
     await renderInbox();
     await waitFor(() => expect(cards()).toHaveLength(3));
+    await userEvent.click(approvalList());
     await userEvent.keyboard("{Control>}a{/Control}");
     await userEvent.keyboard("{Alt>}d{/Alt}");
     expect(plane.answers).toEqual([]);
@@ -422,9 +423,35 @@ describe("the keyboard", () => {
     expect(plane.answers).toEqual([]);
   });
 
-  it("says in words which keys there are", async () => {
+  it("says in words which keys there are and where they act, and the list says it too", async () => {
     await renderInbox();
-    expect(screen.getByText(/Keys:/).textContent).toContain("allows the selected one once");
+    expect(screen.getByText(/Keys,/).textContent).toContain("once the list of approvals has the focus");
+    expect(screen.getByText(/Keys,/).textContent).toContain("allows the selected one");
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    expect(approvalList().getAttribute("aria-describedby")).toBe(screen.getByText(/Keys,/).id);
+  });
+
+  it("answers nothing for a key typed while the focus is not in the list: a single key is not the page's (WCAG 2.1.4)", async () => {
+    await renderInbox();
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    expect(document.activeElement).toBe(document.body);
+    await userEvent.keyboard("jdad");
+    expect(plane.answers).toEqual([]);
+    expect(selected()).toEqual(["first"]);
+    // Tab reaches the list, and then the keys are its own.
+    await userEvent.tab();
+    while (document.activeElement !== approvalList()) await userEvent.tab();
+    await userEvent.keyboard("d");
+    await waitFor(() => expect(plane.answers).toEqual([{ id: "first", decision: "reject", body: {} }]));
+  });
+
+  it("selects the card the focus enters, so the keys act on the card the person is on", async () => {
+    await renderInbox();
+    await waitFor(() => expect(cards()).toHaveLength(3));
+    within(cards()[1]!).getByRole("button", { name: "Deny" }).focus();
+    await waitFor(() => expect(selected()).toEqual(["second"]));
+    await userEvent.keyboard("a");
+    await waitFor(() => expect(plane.answers).toEqual([{ id: "second", decision: "approve", body: {} }]));
   });
 });
 

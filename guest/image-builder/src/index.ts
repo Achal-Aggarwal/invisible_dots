@@ -26,6 +26,7 @@ export { normalizePackageName, parseHashedLock, parsePythonLock, type PythonLock
 export type { ProcessRunner, RunningProcess } from "./process.js";
 export { builderQemuArgs, type Accelerator, type QemuPrograms } from "./qemu.js";
 export {
+  AGENTD_BUILD_SHELL,
   agentdBuildCommand,
   assertLinuxAmd64Elf,
   type BuildCommand,

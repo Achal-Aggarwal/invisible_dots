@@ -262,15 +262,18 @@ async function hashTask(what: string, command: string): Promise<string> {
 
 /**
  * Searches the guest's whole system journal for the key's prefix, inside the
- * guest, without giving the model any part of the key. The Dot's own exec
- * tool runs the command, so the journal is read as the user the model's
- * commands run as; the answer is the hash of "<count> <nonce>", which only
- * the command itself can produce for a count of 0.
+ * guest. The command runs through dot-agentd's /v1/exec, the route the Dot's
+ * exec tool runs commands through, so the journal is read as the user the
+ * model's commands run as; the model itself is not asked, since a careful one
+ * may refuse to search a machine's logs for keys. The answer is the hash of
+ * "<count> <nonce>", which only the whole command can produce for a count of 0.
  */
 async function assertJournalClean(prefix: string, what: string): Promise<void> {
   const nonce = randomBytes(8).toString("hex");
-  const hash = await hashTask("journal", journalCountCommand(prefix, nonce));
-  assert(hash === journalCleanHash(nonce), `the guest journal holds ${what}, or the journal could not be read in full`);
+  const read = await guestExec(state.dotId!, journalCountCommand(prefix, nonce), 2 * MINUTE);
+  assert(read.exit_code === 0, `the guest journal could not be read in full: ${read.stderr.trim()}`);
+  const hash = /\b[0-9a-f]{64}\b/.exec(read.stdout)?.[0];
+  assert(hash === journalCleanHash(nonce), `the guest journal holds ${what}`);
 }
 
 // Stopping, starting and killing a computer
@@ -891,8 +894,12 @@ async function main(): Promise<void> {
     const done = await waitTask(task.id);
     const all = await events(dotId);
     const calls = toolCalls(all, task.id, "exec");
-    assert(calls.some((e) => e.data.interrupted === true && e.data.ok === false), `no interrupted exec event for the task (tools: ${describeTools(all, task.id)})`);
-    assert(calls.length === 1, `exec was called ${calls.length} times in the task, not once (tools: ${describeTools(all, task.id)})`);
+    const interrupted = calls.find((e) => e.data.interrupted === true && e.data.ok === false);
+    assert(interrupted, `no interrupted exec event for the task (tools: ${describeTools(all, task.id)})`);
+    // The command was not run again: no other call of it. The model may run other commands (it may look whether the
+    // marker is there, which is how a careful one checks); what must never happen is the same command a second time.
+    const again = calls.filter((e) => e !== interrupted && e.data.target === interrupted.data.target);
+    assert(again.length === 0, `the interrupted command was called again ${again.length} time(s) (tools: ${describeTools(all, task.id)})`);
     // The command died with the computer and nothing ran it again: once its 8 seconds would be over, no sleep is left and the marker was never written.
     await sleep(10_000);
     const after = await guestExec(dotId, `pgrep -u dot -f 'sleep [8]' >/dev/null && echo running || (wc -l < ${marker} 2>/dev/null || echo 0)`);

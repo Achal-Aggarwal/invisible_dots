@@ -144,6 +144,10 @@ def _fake_mcp_module(
     monkeypatch.setitem(sys.modules, "mcp.shared.exceptions", exc_mod)
 
 
+def _ignore_end(_server: str) -> None:
+    """An on_terminated for the tests that are not about the end of a server."""
+
+
 def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
     tool_def = SimpleNamespace(
         name="demo",
@@ -165,6 +169,7 @@ async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch
     provider = MCPProvider(
         {"test": MCPServerConfig(command="fake")},
         ToolRegistry(),
+        on_terminated=_ignore_end,
     )
     monkeypatch.setattr(mcp_mod, "connect_mcp_servers", connect_mcp_servers)
 
@@ -620,19 +625,8 @@ def _make_fake_session(tool_names: list[str]) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("enabled_tools", "expected_names"),
-    [
-        pytest.param(["*"], ["first", "second"], id="wildcard"),
-        pytest.param(["second"], ["second"], id="raw-allowlist"),
-        pytest.param(["mcp_test_second"], ["second"], id="wrapped-allowlist"),
-        pytest.param([], [], id="deny-all"),
-    ],
-)
 async def test_connect_mcp_servers_loads_all_tool_pages(
     fake_mcp_runtime: dict[str, object | None],
-    enabled_tools: list[str],
-    expected_names: list[str],
 ) -> None:
     cursors: list[str | None] = []
     pages = {
@@ -654,19 +648,16 @@ async def test_connect_mcp_servers_loads_all_tool_pages(
     fake_mcp_runtime["session"] = session
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=enabled_tools)}, registry,
+        {"test": MCPServerConfig(command="fake")}, registry,
     )
     try:
         assert set(stacks) == {"test"}
         assert cursors == [None, "", "opaque:+/="]
-        expected = [f"mcp_test_{name}" for name in expected_names]
+        expected = ["mcp_test_first", "mcp_test_second"]
         assert registry.tool_names == expected
         assert [tool["function"]["name"] for tool in registry.get_definitions()] == expected
-        if expected_names:
-            assert await run_tool(registry, "mcp_test_second", {}) == "second page result"
-            session.call_tool.assert_awaited_once_with("second", arguments={})
-        else:
-            session.call_tool.assert_not_awaited()
+        assert await run_tool(registry, "mcp_test_second", {}) == "second page result"
+        session.call_tool.assert_awaited_once_with("second", arguments={})
     finally:
         for stack in stacks.values():
             await stack.aclose()
@@ -708,32 +699,7 @@ async def test_connect_mcp_servers_pagination_failure_registers_no_tools(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "enabled_tool",
-    [
-        pytest.param("demo", id="raw_names"),
-        pytest.param("mcp_test_demo", id="wrapped_names"),
-    ],
-)
-async def test_connect_mcp_servers_enabled_tools_accepts_raw_and_wrapped_names(
-    fake_mcp_runtime: dict[str,
-    object | None],
-    enabled_tool,
-) -> None:
-    fake_mcp_runtime["session"] = _make_fake_session(["demo", "other"])
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=[enabled_tool])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == ["mcp_test_demo"]
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_defaults_to_all(
+async def test_connect_mcp_servers_registers_every_tool(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session(["demo", "other"])
@@ -749,96 +715,9 @@ async def test_connect_mcp_servers_enabled_tools_defaults_to_all(
 
 
 @pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_supports_limited_wrapped_names(
+async def test_connect_mcp_servers_registers_tools_resources_and_prompts(
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
-    long_tool_name = "tool-" + "very-long-name-" * 8
-    wrapped_name = _sanitize_mcp_tool_name(f"mcp_test_{long_tool_name}")
-    assert len(wrapped_name) == 64
-
-    fake_mcp_runtime["session"] = _make_fake_session([long_tool_name, "other"])
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=[wrapped_name])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == [wrapped_name]
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_empty_list_registers_none(
-    fake_mcp_runtime: dict[str, object | None],
-) -> None:
-    fake_mcp_runtime["session"] = _make_fake_session(["demo", "other"])
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=[])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == []
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_empty_list_blocks_resources_and_prompts(
-    fake_mcp_runtime: dict[str, object | None],
-) -> None:
-    """enabledTools: [] (deny-all) must also block resource and prompt registration."""
-    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
-        tool_names=["demo"],
-        resource_names=["secret_data"],
-        prompt_names=["admin_prompt"],
-    )
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=[])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == []
-    # Resources and prompts must also be blocked
-    assert not any("secret_data" in name for name in registry.tool_names)
-    assert not any("admin_prompt" in name for name in registry.tool_names)
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_specific_list_blocks_resources_and_prompts(
-    fake_mcp_runtime: dict[str, object | None],
-) -> None:
-    """enabledTools with specific tool names must not leak resources or prompts."""
-    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
-        tool_names=["demo", "other"],
-        resource_names=["secret_data"],
-        prompt_names=["admin_prompt"],
-    )
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=["demo"])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    # Only the allowed tool should be registered
-    assert "mcp_test_demo" in registry.tool_names
-    assert "mcp_test_other" not in registry.tool_names
-    # Resources and prompts must not leak
-    assert not any("secret_data" in name for name in registry.tool_names)
-    assert not any("admin_prompt" in name for name in registry.tool_names)
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_prompts(
-    fake_mcp_runtime: dict[str, object | None],
-) -> None:
-    """enabledTools: ['*'] should allow all tools, resources, and prompts."""
     fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
         tool_names=["demo"],
         resource_names=["public_data"],
@@ -846,7 +725,7 @@ async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_p
     )
     registry = ToolRegistry()
     stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=["*"])},
+        {"test": MCPServerConfig(command="fake")},
         registry,
     )
     for stack in stacks.values():
@@ -855,33 +734,6 @@ async def test_connect_mcp_servers_enabled_tools_wildcard_allows_resources_and_p
     assert "mcp_test_demo" in registry.tool_names
     assert any("public_data" in name for name in registry.tool_names)
     assert any("help_prompt" in name for name in registry.tool_names)
-
-
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_warns_on_unknown_entries(
-    fake_mcp_runtime: dict[str, object | None], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
-    registry = ToolRegistry()
-    warnings: list[str] = []
-
-    def _warning(message: str, *args: object) -> None:
-        warnings.append(message.format(*args))
-
-    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.warning", _warning)
-
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=["unknown"])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == []
-    assert warnings
-    assert "enabledTools entries not found: unknown" in warnings[-1]
-    assert "Available raw names: demo" in warnings[-1]
-    assert "Available wrapped names: mcp_test_demo" in warnings[-1]
 
 
 @pytest.mark.asyncio
@@ -1228,7 +1080,6 @@ def test_resource_wrapper_properties() -> None:
     assert "A test resource" in wrapper.description
     assert "file:///tmp/data.txt" in wrapper.description
     assert wrapper.parameters == {"type": "object", "properties": {}, "required": []}
-    assert wrapper.read_only is True
 
 
 @pytest.mark.asyncio
@@ -1303,7 +1154,6 @@ def test_prompt_wrapper_properties() -> None:
     assert wrapper.parameters["properties"]["topic"] == {"type": "string"}
     assert wrapper.parameters["properties"]["style"] == {"type": "string"}
     assert wrapper.parameters["required"] == ["topic"]
-    assert wrapper.read_only is True
 
 
 def test_prompt_wrapper_no_arguments() -> None:
@@ -1537,24 +1387,6 @@ async def test_connect_mcp_servers_sanitizes_resource_names(
     assert "mcp_test_resource_PostgreSQL_System_Information" in registry.tool_names
 
 
-@pytest.mark.asyncio
-async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
-    fake_mcp_runtime: dict[str, object | None],
-) -> None:
-    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
-        tool_names=["My Tool", "other"],
-    )
-    registry = ToolRegistry()
-    stacks = await connect_mcp_servers(
-        {"test": MCPServerConfig(command="fake", enabled_tools=["mcp_test_My_Tool"])},
-        registry,
-    )
-    for stack in stacks.values():
-        await stack.aclose()
-
-    assert registry.tool_names == ["mcp_test_My_Tool"]
-
-
 @pytest.mark.parametrize(
     "url, expected",
     [
@@ -1603,14 +1435,6 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     assert len(wrapper.name) == 64
     assert not wrapper.name.startswith(mcp_mod._tool_prefix(server_name))
 
-    provider = MCPProvider(
-        {server_name: MCPServerConfig(command="fake")},
-        registry,
-    )
-    provider._attach_reconnect_handlers({server_name})
-    assert wrapper._reconnect is not None
-    assert other_wrapper._reconnect is None
-
     removed = mcp_mod._unregister_server_tools(registry, server_name)
 
     assert removed == 1
@@ -1618,30 +1442,61 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
     assert other_wrapper.name in registry.tool_names
 
 
-async def test_a_provider_with_on_terminated_reports_a_dead_session_and_does_not_reconnect() -> None:
-    from mcp.shared.exceptions import McpError
-
-    session = SimpleNamespace(call_tool=AsyncMock(side_effect=McpError(message="Connection closed")))
+@pytest.mark.parametrize(
+    "error_type",
+    [ConnectionResetError, BrokenPipeError, type("ClosedResourceError", (Exception,), {})],
+)
+async def test_a_call_that_finds_the_session_gone_reports_it_and_is_not_repeated(error_type: type) -> None:
+    # The server may have run the call before the connection broke: a call runs at most once.
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=error_type("gone")))
+    ended: list[str] = []
     wrapper = MCPToolWrapper(
         session,
         "srv",
         SimpleNamespace(name="act", description="act", inputSchema={"type": "object", "properties": {}}),
+        on_ended=ended.append,
     )
-    registry = ToolRegistry()
-    registry.register(wrapper)
+
+    result = await wrapper.execute()
+
+    session.call_tool.assert_awaited_once()
+    assert ended == ["srv"]
+    assert is_tool_error_result(result)
+    assert result == f"(MCP tool call failed: {error_type.__name__})"
+
+
+async def test_a_dead_session_is_reported_and_the_call_returns_its_error() -> None:
+    from mcp.shared.exceptions import McpError
+
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=McpError(message="Connection closed")))
     ended: list[str] = []
-    provider = MCPProvider({"srv": MCPServerConfig(command="fake")}, registry, on_terminated=ended.append)
-    provider._attach_reconnect_handlers({"srv"})
-    reconnects = AsyncMock()
-    provider._refresh_terminated_server = reconnects  # type: ignore[method-assign]
+    wrapper = MCPToolWrapper(
+        session,
+        "srv",
+        SimpleNamespace(name="act", description="act", inputSchema={"type": "object", "properties": {}}),
+        on_ended=ended.append,
+    )
 
     result = await wrapper.execute()
 
     assert ended == ["srv"]
-    reconnects.assert_not_awaited()
     session.call_tool.assert_awaited_once()
     assert is_tool_error_result(result)
     assert result.startswith("(MCP tool call failed: ")
+
+
+async def test_a_failure_that_is_not_the_sessions_end_is_not_reported() -> None:
+    session = SimpleNamespace(call_tool=AsyncMock(side_effect=RuntimeError("bad arguments")))
+    ended: list[str] = []
+    wrapper = MCPToolWrapper(
+        session,
+        "srv",
+        SimpleNamespace(name="act", description="act", inputSchema={"type": "object", "properties": {}}),
+        on_ended=ended.append,
+    )
+
+    assert await wrapper.execute() == "(MCP tool call failed: RuntimeError)"
+    assert ended == []
 
 
 class _ReadStream:
@@ -1686,29 +1541,6 @@ async def test_a_provider_with_on_terminated_hears_an_idle_servers_end_only_whil
     provider._transport_ended("srv")
 
     assert ended == ["srv"]
-
-
-async def test_a_provider_without_on_terminated_does_nothing_about_the_end_of_the_transport(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    provider = MCPProvider({"srv": MCPServerConfig(command="fake")}, ToolRegistry())
-    connection = SimpleNamespace(aclose=AsyncMock())
-    provider._connections["srv"] = connection  # type: ignore[assignment]
-    reconnect = AsyncMock()
-    provider._refresh_terminated_server = reconnect  # type: ignore[method-assign]
-    connect = AsyncMock()
-    monkeypatch.setattr(mcp_mod, "connect_mcp_servers", connect)
-    tasks_before = asyncio.all_tasks()
-
-    provider._transport_ended("srv")
-    await asyncio.sleep(0)
-
-    # No reconnect, no new connection, nothing closed, nothing left running in the background.
-    reconnect.assert_not_awaited()
-    connect.assert_not_awaited()
-    connection.aclose.assert_not_awaited()
-    assert provider._connections == {"srv": connection}
-    assert asyncio.all_tasks() == tasks_before
 
 
 @pytest.mark.parametrize("params, error", [
@@ -1900,7 +1732,7 @@ async def test_provider_connect_returns_no_failed_server_when_every_server_is_li
     fake_mcp_runtime: dict[str, object | None],
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
-    provider = MCPProvider({"test": MCPServerConfig(command="fake")}, ToolRegistry())
+    provider = MCPProvider({"test": MCPServerConfig(command="fake")}, ToolRegistry(), on_terminated=_ignore_end)
 
     assert await provider.connect() == []
     assert await provider.connect() == []
@@ -1935,7 +1767,8 @@ async def test_provider_connect_returns_the_servers_that_failed_and_retries_them
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _selective_stdio_client)
     registry = ToolRegistry()
     provider = MCPProvider(
-        {"bad": MCPServerConfig(command="bad"), "good": MCPServerConfig(command="good")}, registry
+        {"bad": MCPServerConfig(command="bad"), "good": MCPServerConfig(command="good")}, registry,
+        on_terminated=_ignore_end,
     )
 
     assert await provider.connect() == ["bad"]
@@ -1957,7 +1790,8 @@ async def test_provider_connect_reports_every_server_when_the_batch_itself_fails
 
     monkeypatch.setattr(mcp_mod, "connect_mcp_servers", failing_connect)
     provider = MCPProvider(
-        {"a": MCPServerConfig(command="a"), "b": MCPServerConfig(command="b")}, ToolRegistry()
+        {"a": MCPServerConfig(command="a"), "b": MCPServerConfig(command="b")}, ToolRegistry(),
+        on_terminated=_ignore_end,
     )
 
     assert await provider.connect() == ["a", "b"]
@@ -1969,7 +1803,7 @@ async def test_provider_connect_after_close_connects_nothing_and_reports_the_ser
 ) -> None:
     fake_mcp_runtime["session"] = _make_fake_session(["demo"])
     registry = ToolRegistry()
-    provider = MCPProvider({"test": MCPServerConfig(command="fake")}, registry)
+    provider = MCPProvider({"test": MCPServerConfig(command="fake")}, registry, on_terminated=_ignore_end)
     await provider.aclose()
 
     assert await provider.connect() == ["test"]

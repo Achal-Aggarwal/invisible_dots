@@ -3,6 +3,7 @@
  * section 9.6), built on `fetch` so it runs in Node and in browsers.
  */
 import {
+  abortableSleep,
   SseParser,
   type ApprovalStatus,
   type BrowserIdentity,
@@ -10,7 +11,6 @@ import {
   type ListOrder,
   type McpSecretsAnswer,
   type StoredEvent,
-  type ToolInfo,
   type Skill,
   type SkillListAnswer,
   type ToolListAnswer,
@@ -28,10 +28,12 @@ import type {
   ConversationMessage,
   CreateTaskRequest,
   DoctorAnswer,
+  DotChannelRecord,
   DotRecord,
   DotsAnswer,
   DotSummary,
   EventsAnswer,
+  EveryChannelAnswer,
   FilesListAnswer,
   HealthResponse,
   IdentitiesAnswer,
@@ -234,6 +236,11 @@ export class InvisibleDotsClient {
     return (await this.#json<TasksAnswer>("GET", `/api/dots/${enc(idOrName)}/tasks`, { query: { limit: page.limit, before: page.before } })).tasks;
   }
 
+  /** The tasks of every Dot that ended in `status` after `finishedAfter`, the latest end first. */
+  async endedTasks(status: "COMPLETED" | "FAILED" | "CANCELLED", finishedAfter: Date): Promise<TaskRecord[]> {
+    return (await this.#json<TasksAnswer>("GET", "/api/tasks", { query: { status, finished_after: finishedAfter.toISOString() } })).tasks;
+  }
+
   getTask(taskId: string): Promise<TaskRecord> {
     return this.#json("GET", `/api/tasks/${enc(taskId)}`);
   }
@@ -302,6 +309,11 @@ export class InvisibleDotsClient {
   /** The Dot's messaging channels with the people paired to each. Never a token. */
   async channels(idOrName: string): Promise<ChannelRecord[]> {
     return (await this.channelsOverview(idOrName)).channels;
+  }
+
+  /** Every channel of every Dot, each with its Dot's id. */
+  async everyChannel(): Promise<DotChannelRecord[]> {
+    return (await this.#json<EveryChannelAnswer>("GET", "/api/channels")).channels;
   }
 
   /** The Dot's channels and the kinds this server can run (WhatsApp is there only when the server was started with it). */
@@ -502,7 +514,7 @@ export class InvisibleDotsClient {
       }
       attempt++;
       options.onReconnect?.({ after, attempt, error: failure });
-      await delay(Math.min(500 * 2 ** (attempt - 1), 15_000), options.signal);
+      await abortableSleep(Math.min(500 * 2 ** (attempt - 1), 15_000), options.signal);
     }
   }
 
@@ -535,17 +547,4 @@ async function toApiError(response: Response, route: string): Promise<ApiError> 
     // Not JSON; the text itself is the message.
   }
   return new ApiError(response.status, `http_${response.status}`, `${route}: HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ""}`);
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) return resolve();
-    const timer = setTimeout(done, ms);
-    function done() {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve();
-    }
-    signal?.addEventListener("abort", done, { once: true });
-  });
 }

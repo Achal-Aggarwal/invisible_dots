@@ -82,12 +82,6 @@ describe("the computer panel", () => {
     expect(requested(/screenshot|browser-identities/)).toEqual([]);
   });
 
-  it("asks nothing of an IDLE computer either: the host answers its guest routes only while the computer is RUNNING", async () => {
-    await renderPanel("IDLE");
-    expect(screen.getByText(/The computer is idle/)).toBeTruthy();
-    expect(requested(/screenshot|browser-identities/)).toEqual([]);
-  });
-
   it("says what state the computer is in while it is on its way up", async () => {
     await renderPanel("STARTING");
     expect(screen.getByText(/The computer is starting/)).toBeTruthy();

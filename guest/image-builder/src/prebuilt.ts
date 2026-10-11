@@ -14,11 +14,11 @@
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { chmod, mkdir, open, rm } from "node:fs/promises";
+import { mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { replaceFile } from "@invisible-dots/shared";
 import { DownloadError, fetchTextWithRetries, fetchVerified, type FetchVerifiedOptions } from "./download.js";
-import { writeManifest, type GoldenManifest } from "./manifest.js";
+import type { GoldenManifest } from "./manifest.js";
+import { publishImage } from "./publish.js";
 import { checkVersion } from "./versions.js";
 
 /** Where the releases of the repository are downloaded from. */
@@ -139,10 +139,8 @@ export async function pullPrebuiltGolden(options: PullOptions): Promise<PulledIm
     throw new Error(`the prebuilt golden image hashes to ${sha256}, its manifest says ${manifest.sha256}`);
   }
   const manifestPath = options.manifestPath(image);
-  // The manifest first, as for a built image: the control plane picks images by file name.
-  await writeManifest(manifestPath, manifest);
-  await replaceFile(partial, image);
-  await chmod(image, 0o444);
+  // Published as a built image is: the manifest first, the image read-only.
+  await publishImage(partial, image, manifestPath, manifest);
   await rm(workDir, { recursive: true, force: true });
   log(`done: ${image} (sha256 ${sha256})`);
   return { version, image, manifest: manifestPath };

@@ -29,7 +29,8 @@ esac
 export AGENTD_BIN
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
-# nftables and iproute2: the check of the VM proxy's firewall runs install.sh's own generator and nft on its output.
+# nftables and iproute2: the checks of the VM proxy run the runtime disk's vmproxy.py (it reads the default route)
+# and nft on its output.
 apt-get install -y -qq sudo procps jq curl ca-certificates python3 nftables iproute2 >/dev/null
 
 builder=$TREE/guest/image-builder/builder
@@ -73,8 +74,11 @@ print('imported', len(names), 'modules from', nanobot.__file__)
 "
 
 if [ "$suite" = browser ]; then
-  # The packages of the golden image (pins.json), as provision.sh installs them.
-  apt-get install -y -qq --no-install-recommends $(jq -r '.apt_packages[]' "$TREE/guest/image-builder/pins.json") >/dev/null
+  # The packages of the golden image (pins.json), as provision.sh installs them: from the archive as of the pinned
+  # snapshot (reached over https, which the ca-certificates installed above make possible).
+  snapshot=$(jq -r '.apt_snapshot' "$TREE/guest/image-builder/pins.json")
+  apt-get --snapshot "$snapshot" --error-on=any update -qq >/dev/null
+  apt-get --snapshot "$snapshot" install -y -qq --no-install-recommends $(jq -r '.apt_packages[]' "$TREE/guest/image-builder/pins.json") >/dev/null
   # The Dot's browser, with the script provision.sh runs on the same lock. dot reaches its home, not the tree.
   bash "$builder/build-browser-env.sh" "$builder/mcp-requirements.lock" /home/dot/.local/share/invisible-dots/mcp
 fi

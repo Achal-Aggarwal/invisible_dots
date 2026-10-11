@@ -24,7 +24,6 @@ class _FakeSpec:
     model_id_prefix = None
     strip_model_prefix = False
     max_completion_tokens = False
-    reasoning_effort = None
 
 
 def _provider():

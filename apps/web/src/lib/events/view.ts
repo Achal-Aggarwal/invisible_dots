@@ -9,14 +9,16 @@
  */
 import {
   parseMessageOrigin,
+  toolLabel,
   type HostEventDataMap,
   type InboundEventDataMap,
   type OutboundEventDataMap,
   type StoredEvent,
 } from "@invisible-dots/shared/browser";
 import { CHANNEL_LABELS, viaChannel } from "../channels";
+import { formatMillis } from "../format";
+import { APPROVAL_WORD, TOOL_OUTCOME, toolStateOf } from "../steps";
 import type { Tone } from "../tone";
-import { toolLabel } from "./tool-labels";
 
 /** What the Activity page filters by: one family per kind of thing that happens to a Dot. */
 export const EVENT_FAMILIES = ["chat", "tasks", "tools", "approvals", "memory", "browser", "computer", "channels", "dot"] as const;
@@ -137,13 +139,6 @@ interface Draft {
   tool?: string;
 }
 
-/** How a tool call ended, in the words of the row. A denied call never ran; an interrupted one has no known outcome. */
-function outcome(data: Partial<OutboundEventDataMap["tool.called"]>): { word: string; tone: Tone } {
-  if (data.interrupted === true) return { word: "interrupted", tone: "warn" };
-  if (data.decision === "deny") return { word: "denied", tone: "error" };
-  return data.ok === true ? { word: "ok", tone: "neutral" } : { word: "failed", tone: "error" };
-}
-
 /** What a task event says, after the task it is about. */
 const withTask = (taskId: unknown, rest: string): string => joined(text(taskId) && `${text(taskId)}:`, rest);
 
@@ -163,8 +158,8 @@ const DESCRIBE: { [K in KnownType]: (data: Partial<EventData[K]>) => Draft } = {
   "task.failed": (d) => ({ title: "Task failed", detail: withTask(d.task_id, text(d.error)), tone: "error" }),
   "task.cancelled": (d) => ({ title: "Task cancelled", detail: text(d.task_id), tone: "neutral" }),
   "tool.called": (d) => {
-    const { word, tone } = outcome(d);
-    const duration = typeof d.duration_ms === "number" ? ` in ${Math.round(d.duration_ms)} ms` : "";
+    const { word, tone } = TOOL_OUTCOME[toolStateOf(d)];
+    const duration = typeof d.duration_ms === "number" ? ` in ${formatMillis(d.duration_ms)}` : "";
     const tool = text(d.tool);
     // What it acted on, how it ended, and which tool under which permission the policy decided on.
     const policy = joined(tool, text(d.permission) && `[${text(d.permission)}]`, text(d.decision));
@@ -181,7 +176,7 @@ const DESCRIBE: { [K in KnownType]: (data: Partial<EventData[K]>) => Draft } = {
     tone: "warn",
   }),
   "approval.resolved": (d) => ({
-    title: d.decision === "approve" ? (d.always === true ? "Approved, and always allowed" : "Approved") : d.decision === "reject" ? "Rejected" : "Approval resolved",
+    title: d.decision === "approve" ? `${APPROVAL_WORD.approved}${d.always === true ? " for good" : ""}` : d.decision === "reject" ? APPROVAL_WORD.rejected : "Approval resolved",
     detail: joined(text(d.approval_id), text(d.note) && `- ${text(d.note)}`),
     tone: d.decision === "reject" ? "warn" : "ok",
   }),

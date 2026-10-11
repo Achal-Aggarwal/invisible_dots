@@ -231,19 +231,6 @@ async def test_refuses_ids_that_could_leave_the_browsers_directory(env: Env) -> 
     assert not (env.tmp_path / "etc").exists()
 
 
-async def test_an_archived_identity_is_reported_so_and_is_not_launched(env: Env) -> None:
-    manager = env.manager()
-    identity = await manager.create("old")
-    env.store.write(lambda conn: dots_store.set_identity_archived(conn, identity.id, True))
-
-    archived = manager.get(identity.id)
-    assert archived is not None and archived.status == "archived"
-    with pytest.raises(BrowserIdentityError, match="archived") as refused:
-        await manager.launch(identity.id)
-    assert refused.value.code == "invalid"
-    assert manager.open_count == 0
-
-
 def test_the_limits_are_integers_of_at_least_one(env: Env) -> None:
     for options in ({"max_open": 0}, {"max_identities": 0}, {"max_open": 1.5}, {"max_identities": True}):
         with pytest.raises(ValueError, match="at least 1"):

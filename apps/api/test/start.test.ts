@@ -166,11 +166,15 @@ describe("startServer on an empty INVISIBLE_DOTS_HOME", { timeout: 120_000 }, ()
     };
     const server = await start({ doctor: { ...base, acceleratorAccess } });
     const api = new InvisibleDotsClient({ baseUrl: server.url, token: server.token });
+    let arrived = 0;
+    server.app.server.on("request", (request: { url?: string }) => {
+      if (request.url === "/api/doctor") arrived += 1;
+    });
 
     const together = Promise.all([api.doctor(), api.doctor(), api.doctor()]);
-    await waitFor(() => probes === 1, "the first request to start the probe");
-    // Time for the other two requests to reach the server while the probe is held.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitFor(() => probes === 1 && arrived === 3, "all three requests at the server while the probe is held");
+    // A request's hooks and handler run on promises once it has arrived: one turn of the event loop has them joined.
+    await new Promise((resolve) => setImmediate(resolve));
     release();
     const [first, second, third] = await together;
     expect(probes).toBe(1);
@@ -200,7 +204,7 @@ describe("startServer on an empty INVISIBLE_DOTS_HOME", { timeout: 120_000 }, ()
     await first.db.dots.insert({
       id: dotId,
       config: parseDotConfig("name: channeled\nmodel:\n  provider: openrouter\n  id: test/model\n"),
-      status: "DISABLED",
+      status: "IDLE",
     });
     await first.channels.add(dotId, "telegram");
     await stopped(first);

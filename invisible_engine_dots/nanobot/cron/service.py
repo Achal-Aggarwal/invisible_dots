@@ -548,7 +548,7 @@ class CronService:
 
     def _append_action(
         self,
-        action: Literal["add", "del", "update"],
+        action: Literal["add", "del"],
         params: dict[str, Any],
     ) -> None:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
@@ -601,42 +601,9 @@ class CronService:
         logger.info("Cron: added job '{}' ({})", name, job.id)
         return job
 
-    def register_system_job(self, job: CronJob) -> CronJob:
-        """Register an internal system job (idempotent on restart)."""
+    def remove_job(self, job_id: str) -> Literal["removed", "not_found"]:
+        """Remove a job by ID."""
         store = self._require_store()
-        now = _now_ms()
-        job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
-        job.created_at_ms = now
-        job.updated_at_ms = now
-        store.jobs = [j for j in store.jobs if j.id != job.id]
-        store.jobs.append(job)
-        self._save_store()
-        self._arm_timer()
-        logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
-        return job
-
-    def remove_system_job(self, job_id: str) -> bool:
-        """Remove a protected system job during startup reconciliation."""
-        store = self._require_store()
-        before = len(store.jobs)
-        store.jobs = [j for j in store.jobs if j.id != job_id]
-        removed = len(store.jobs) < before
-        if removed:
-            self._save_store()
-            self._arm_timer()
-            logger.info("Cron: removed system job {}", job_id)
-        return removed
-
-    def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
-        """Remove a job by ID, unless it is a protected system job."""
-        store = self._require_store()
-        job = next((j for j in store.jobs if j.id == job_id), None)
-        if job is None:
-            return "not_found"
-        if job.payload.kind == "system_event":
-            logger.info("Cron: refused to remove protected system job {}", job_id)
-            return "protected"
-
         before = len(store.jobs)
         store.jobs = [j for j in store.jobs if j.id != job_id]
         removed = len(store.jobs) < before
@@ -651,94 +618,6 @@ class CronService:
             return "removed"
 
         return "not_found"
-
-    def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
-        """Enable or disable a job."""
-        store = self._require_store()
-        for job in store.jobs:
-            if job.id == job_id:
-                job.enabled = enabled
-                job.updated_at_ms = _now_ms()
-                if job.enabled:
-                    job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
-                else:
-                    job.state.next_run_at_ms = None
-                if self._should_persist_store():
-                    self._save_store()
-                    self._arm_timer()
-                else:
-                    self._append_action("update", asdict(job))
-                return job
-        return None
-
-    def update_job(
-        self,
-        job_id: str,
-        *,
-        name: str | None = None,
-        schedule: CronSchedule | None = None,
-        message: str | None = None,
-        delete_after_run: bool | None = None,
-    ) -> CronJob | Literal["not_found", "protected"]:
-        """Update mutable fields of an existing job. System jobs cannot be updated.
-
-        Preserve the next occurrence unless the schedule actually changes.
-        """
-        store = self._require_store()
-        job = next((j for j in store.jobs if j.id == job_id), None)
-        if job is None:
-            return "not_found"
-        if job.payload.kind == "system_event":
-            return "protected"
-
-        schedule_changed = schedule is not None and schedule != job.schedule
-        if schedule is not None:
-            _validate_schedule_for_add(schedule)
-            job.schedule = schedule
-        if name is not None:
-            job.name = name
-        if message is not None:
-            job.payload.message = message
-        if delete_after_run is not None:
-            job.delete_after_run = delete_after_run
-        job.updated_at_ms = _now_ms()
-        if not job.enabled:
-            job.state.next_run_at_ms = None
-        elif schedule_changed:
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
-
-        if self._should_persist_store():
-            self._save_store()
-            self._arm_timer()
-        else:
-            self._append_action("update", asdict(job))
-
-        logger.info("Cron: updated job '{}' ({})", job.name, job.id)
-        return job
-
-    async def run_job(self, job_id: str, force: bool = False) -> bool:
-        """Manually run a job without disturbing the service's running state."""
-        reload_store = self._active_executions == 0
-        self._active_executions += 1
-        try:
-            # A manual run is another side-effecting entrypoint.  Do not start
-            # it while the result of a previous timer execution is still only
-            # in memory.
-            if self._store_dirty:
-                self._save_store()
-            store = self._require_store(reload_during_execution=reload_store)
-            for job in store.jobs:
-                if job.id == job_id:
-                    if not force and not job.enabled:
-                        return False
-                    await self._execute_job(job)
-                    self._save_store()
-                    return True
-            return False
-        finally:
-            self._active_executions -= 1
-            if self._running and self._active_executions == 0:
-                self._arm_timer()
 
     def get_job(self, job_id: str) -> CronJob | None:
         """Get a job by ID."""

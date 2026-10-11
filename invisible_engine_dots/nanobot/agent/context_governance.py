@@ -2,25 +2,20 @@
 
 This module owns model-facing message shaping, request pressure, H/delta
 compaction state, and tool-result content normalization. It may return copied
-messages or persisted-result placeholders, but it must not mutate an existing
-session history list in place.
+messages, but it must not mutate an existing session history list in place.
 """
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from uuid import uuid4
 
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
-from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import CONTEXT_SAFETY_BUFFER, LLMUsage
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.summary import (
@@ -30,7 +25,6 @@ from nanobot.session.summary import (
 from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
-    maybe_persist_tool_result,
     truncate_text,
 )
 from nanobot.utils.runtime import ensure_nonempty_tool_result
@@ -46,8 +40,8 @@ HistoryConsolidator = Callable[
     Awaitable[str | None],
 ]
 
-# read_file has its own bound; exempt it to avoid persist->read->persist loops.
-TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS = frozenset({"read_file"})
+# read_file has its own bound, so its result is not cut to max_tool_result_chars.
+TOOL_RESULT_CUT_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable - call was interrupted or lost]"
 # A request is compacted only when it reaches its model's own window, less the room kept for the answer: 20000
 # tokens, or the model's longest answer when that is shorter (opencode's rule, MIT:
@@ -127,7 +121,6 @@ class ContextGovernanceConfig:
     provider: LLMProvider
     model: str
     tools: ToolRegistry
-    workspace: Path | None
     session_key: str | None
     max_tool_result_chars: int
     context_window_tokens: int | None = None
@@ -218,7 +211,6 @@ class ModelRequestState:
     usage: LLMUsage | None = None
     messages: list[dict[str, Any]] | None = None
     tool_definitions: list[dict[str, Any]] | None = None
-    events: EventSink = NO_EVENTS
     # The answer limit of the request prepare_request prepared last (None: no limit is known, none is sent).
     answer_tokens: int | None = None
 
@@ -370,67 +362,48 @@ class ContextGovernor:
     ) -> list[dict[str, Any]]:
         """Replace accepted history H with a checkpoint while preserving delta."""
         measured, _source = pressure
-        compaction_id = uuid4().hex
-        await state.events.emit(
-            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+        delta_messages = compaction.delta_after_accepted(messages)
+        consolidation_prefix = self.prepare_messages_for_model(
+            state.config,
+            compaction.accepted_messages,
         )
-        try:
-            delta_messages = compaction.delta_after_accepted(messages)
-            consolidation_prefix = self.prepare_messages_for_model(
-                state.config,
-                compaction.accepted_messages,
+        summary = await compaction.consolidate_history(
+            deepcopy(consolidation_prefix),
+            compaction.active_summary,
+        )
+        if not summary:
+            raise ContextWindowExceededError(
+                session_key=state.config.session_key,
+                estimated_tokens=measured,
+                input_budget=self.input_budget(state.config),
+                source=_source,
             )
-            summary = await compaction.consolidate_history(
-                deepcopy(consolidation_prefix),
-                compaction.active_summary,
-            )
-            if not summary:
-                raise ContextWindowExceededError(
-                    session_key=state.config.session_key,
-                    estimated_tokens=measured,
-                    input_budget=self.input_budget(state.config),
-                    source=_source,
-                )
 
-            compaction.active_summary = summary
-            # Fresh user input defines the next task. Only ongoing work without
-            # new user input needs a temporary instruction to resume after H is replaced.
-            continuation = (
-                []
-                if any(message.get("role") == "user" for message in delta_messages)
-                else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
-            )
-            prepared = self.prepare_messages_for_model(
-                state.config,
-                [
-                    *self._summary_transcript(compaction, summary),
-                    *continuation,
-                    *delta_messages,
-                ],
-            )
-            state.usage = None
-            prepared = self.ensure_request_fits(
-                state.config,
-                prepared,
-                tool_definitions=tool_definitions,
-            )
-            compaction.summary_checkpoint = SessionSummaryCheckpoint(
-                summary=summary,
-                transcript_boundary=compaction.raw_accepted_boundary,
-            )
-        except (Exception, asyncio.CancelledError) as exc:
-            await state.events.emit(
-                ContextCompactionEvent(
-                    compaction_id=compaction_id,
-                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
-                ),
-            )
-            raise
-        await state.events.emit(
-            ContextCompactionEvent(
-                compaction_id=compaction_id,
-                phase="succeeded",
-            ),
+        compaction.active_summary = summary
+        # Fresh user input defines the next task. Only ongoing work without
+        # new user input needs a temporary instruction to resume after H is replaced.
+        continuation = (
+            []
+            if any(message.get("role") == "user" for message in delta_messages)
+            else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+        )
+        prepared = self.prepare_messages_for_model(
+            state.config,
+            [
+                *self._summary_transcript(compaction, summary),
+                *continuation,
+                *delta_messages,
+            ],
+        )
+        state.usage = None
+        prepared = self.ensure_request_fits(
+            state.config,
+            prepared,
+            tool_definitions=tool_definitions,
+        )
+        compaction.summary_checkpoint = SessionSummaryCheckpoint(
+            summary=summary,
+            transcript_boundary=compaction.raw_accepted_boundary,
         )
         return prepared
 
@@ -539,54 +512,31 @@ class ContextGovernor:
     @staticmethod
     def normalize_tool_result(
         config: ContextGovernanceConfig,
-        tool_call_id: str,
         tool_name: str,
         result: Any,
     ) -> Any:
+        """A tool result as the model gets it: never empty, and its text cut to max_tool_result_chars."""
         result = ensure_nonempty_tool_result(tool_name, result)
-        if tool_name in TOOL_RESULT_OFFLOAD_EXEMPT_TOOLS:
+        if tool_name in TOOL_RESULT_CUT_EXEMPT_TOOLS:
             return result
-
-        def persist_text(text: str, call_id: str) -> str:
-            content = maybe_persist_tool_result(
-                config.workspace,
-                config.session_key,
-                call_id,
-                text,
-                max_chars=config.max_tool_result_chars,
-            )
-            # Persisted references must retain their complete paths.
-            return truncate_text(content, config.max_tool_result_chars) if config.workspace is None else content
-
-        original_result: object = result
-        try:
-            if isinstance(result, str):
-                return persist_text(result, tool_call_id)
-            if isinstance(result, list):
-                result = cast(list[object], result)
-                blocks: list[dict[str, Any]] = []
-                for raw_block in result:
-                    if not isinstance(raw_block, dict):
-                        return result
-                    block = cast(dict[str, Any], raw_block)
-                    if not isinstance(block.get("type"), str):
-                        return result
-                    if block["type"] == "text" and not isinstance(block.get("text"), str):
-                        return result
-                    blocks.append(block)
-                # Image redaction must not change how neighboring text is normalized.
-                return [
-                    {**block, "text": persist_text(block["text"], f"{tool_call_id}_text_{index}")}
-                    if block["type"] == "text" else block
-                    for index, block in enumerate(blocks)
-                ]
-        except Exception:
-            logger.exception(
-                "Tool result persist failed for {} in {}; using raw result",
-                tool_call_id,
-                config.session_key or "default",
-            )
-            return truncate_text(result, config.max_tool_result_chars) if isinstance(result, str) else original_result
+        if isinstance(result, str):
+            return truncate_text(result, config.max_tool_result_chars)
+        if isinstance(result, list):
+            blocks = cast(list[object], result)
+            for raw_block in blocks:
+                if not isinstance(raw_block, dict):
+                    return result
+                block = cast(dict[str, Any], raw_block)
+                if not isinstance(block.get("type"), str):
+                    return result
+                if block["type"] == "text" and not isinstance(block.get("text"), str):
+                    return result
+            # Image redaction must not change how neighboring text is normalized.
+            return [
+                {**block, "text": truncate_text(block["text"], config.max_tool_result_chars)}
+                if block["type"] == "text" else block
+                for block in cast(list[dict[str, Any]], blocks)
+            ]
         return result
 
     @staticmethod
@@ -785,7 +735,6 @@ class ContextGovernor:
                 continue
             normalized = self.normalize_tool_result(
                 config,
-                str(message.get("tool_call_id") or f"tool_{idx}"),
                 str(message.get("name") or "tool"),
                 message.get("content"),
             )

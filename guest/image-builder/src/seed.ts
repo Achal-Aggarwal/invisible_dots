@@ -2,7 +2,8 @@
  * The builder VM's seed disk. It is one ISO labelled `cidata`: cloud-init's
  * NoCloud datasource reads user-data and meta-data from it, and the
  * provisioner mounts it again to reach its own files, so the builder needs
- * one CD-ROM and no second payload disk.
+ * this one read-only disk (a virtio disk, as every ISO of this project is
+ * attached: the vm-manager's isoDriveArg) and no second payload disk.
  */
 import type { IsoEntry } from "@invisible-dots/iso";
 import { downloadFileName, type GuestPins } from "./pins.js";
@@ -53,6 +54,7 @@ export function pinsEnv(pins: GuestPins, python: PythonLock): string {
     ["ENGINE_LOCK", SEED_ENGINE_LOCK],
     ["ENGINE_BUILD", SEED_ENGINE_BUILD],
     ["BROWSER_BUILD", SEED_BROWSER_BUILD],
+    ["APT_SNAPSHOT", pins.apt_snapshot],
     ["APT_PACKAGES", pins.apt_packages.join(" ")],
   ];
   return values

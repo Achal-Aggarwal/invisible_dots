@@ -7,11 +7,11 @@ describe("what the composer says", () => {
     expect(composerState(undefined)).toEqual({ blocked: null, hint: null });
   });
 
-  it("stops the person only for a Dot that is disabled or being deleted, and says why", () => {
-    expect(composerState({ status: "DISABLED", computer_state: "STOPPED" }).blocked).toMatch(/disabled/);
+  it("stops the person only for a Dot that is being deleted, and says why", () => {
     expect(composerState({ status: "READY", computer_state: "DELETING" }).blocked).toMatch(/being deleted/);
     // Being deleted wins over any other state.
-    expect(composerState({ status: "DISABLED", computer_state: "DELETING" }).blocked).toMatch(/being deleted/);
+    expect(composerState({ status: "ERROR", computer_state: "DELETING" }).blocked).toMatch(/being deleted/);
+    expect(composerState({ status: "ERROR", computer_state: "STOPPED" }).blocked).toBeNull();
   });
 
   it("explains the wait, without blocking, when the computer is not up", () => {

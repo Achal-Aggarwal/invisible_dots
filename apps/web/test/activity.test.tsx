@@ -70,7 +70,7 @@ describe("the Activity page", () => {
     expect(titles()).toEqual(["Assistant replied", "Ran a command", "You sent a message", "The engine started"]);
 
     const [reply, tool, message, started] = rows();
-    expect(within(tool!).getByText("ls -la | ok in 12 ms | exec [computer.exec] allow")).toBeTruthy();
+    expect(within(tool!).getByText("ls -la | done in 12 ms | exec [computer.exec] allow")).toBeTruthy();
     expect(within(tool!).getByText("tool.called")).toBeTruthy();
     expect(within(message!).getByText("via Telegram")).toBeTruthy();
     expect(within(message!).getByText("find fares")).toBeTruthy();

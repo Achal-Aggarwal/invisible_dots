@@ -1,7 +1,7 @@
-import type { ChannelKind, ChannelRecord } from "@invisible-dots/shared/browser";
+import { accountLabel, type ChannelKind, type ChannelRecord } from "@invisible-dots/shared/browser";
 import { MessageCircleIcon, SendIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { accountHref, accountLabel, CHANNEL_LABELS } from "../../lib/channels";
+import { accountHref, CHANNEL_LABELS } from "../../lib/channels";
 import { ChannelStateChip } from "./state-chip";
 
 const ICONS = { telegram: SendIcon, whatsapp: MessageCircleIcon } as const satisfies Record<ChannelKind, unknown>;

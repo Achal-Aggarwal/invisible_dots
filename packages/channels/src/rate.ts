@@ -1,4 +1,4 @@
-import type { Clock } from "@invisible-dots/scheduler";
+import { type Clock } from "@invisible-dots/shared";
 
 /** A token bucket per key: `capacity` messages at once, refilled at `refillPerSecond`. */
 export class RateLimiter {

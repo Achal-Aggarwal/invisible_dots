@@ -41,9 +41,10 @@ import {
   type SecretsRequest,
   type SkillListAnswer,
   type ToolListAnswer,
+  silentLogger,
+  type Logger,
 } from "@invisible-dots/shared";
 import { GuestRequestError } from "./errors.js";
-import { silentLogger, type Logger } from "./logger.js";
 import { GUEST_PORT_HOST } from "./ports.js";
 
 export interface GuestClientOptions {

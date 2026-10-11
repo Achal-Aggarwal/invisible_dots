@@ -160,7 +160,7 @@ test("the old addresses lead to the Inbox, a Dot's approvals to the Inbox filter
   await expect(page.getByRole("navigation", { name: "Dot sections" }).getByRole("link", { name: /Approvals/ })).toHaveCount(0);
 });
 
-test("the Inbox is answered from the keyboard alone: j and k choose, a allows once, d denies, and a command waits for its confirmation", async ({ page, fresh: harness }) => {
+test("the Inbox is answered from the keyboard alone: Tab to the list, j and k choose, a allows once, d denies, and a command waits for its confirmation", async ({ page, fresh: harness }) => {
   const dot = await harness.createDot("inbox-keys");
   const guest = harness.driver.guestOf(dot.id);
   const one = ask(guest, navigate("https://example.com/one"));
@@ -170,6 +170,13 @@ test("the Inbox is answered from the keyboard alone: j and k choose, a allows on
   await expect(cards(page)).toHaveCount(3);
   const selected = page.locator("article[aria-current=true]");
   await expect(selected).toHaveAttribute("data-approval-id", one);
+
+  // A key typed while the focus is elsewhere on the page answers nothing (WCAG 2.1.4): the keys are the list's.
+  await page.keyboard.press("d");
+  await page.keyboard.press("a");
+  expect(await harness.api.listApprovals("pending")).toHaveLength(3);
+  const list = page.getByRole("list", { name: "Approvals waiting for your answer" });
+  while (!(await list.evaluate((element) => element === document.activeElement))) await page.keyboard.press("Tab");
 
   await page.keyboard.press("a");
   await expect(selected.getByRole("status")).toHaveText("Allowed");

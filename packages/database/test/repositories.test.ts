@@ -60,6 +60,8 @@ describe.each(testAdapters())("repositories on %s", { timeout: SETUP_TIMEOUT }, 
       "0010_dot_has_no_goal",
       "0011_dot_has_no_browser_settings",
       "0012_dot_has_no_context_tokens",
+      "0013_approval_used",
+      "0014_states_that_exist",
     ]);
   });
 
@@ -275,7 +277,7 @@ describe.each(testAdapters())("repositories on %s", { timeout: SETUP_TIMEOUT }, 
 
   it("computers: stoppedWithAutomationBy lists the stopped computers whose automation is due by then, earliest first", async () => {
     const at = (iso: string) => Date.parse(iso);
-    const seed = async (name: string, state: "STOPPED" | "RUNNING", nextAt: number | null, status: "IDLE" | "ERROR" | "DISABLED" | "CREATING" = "IDLE") => {
+    const seed = async (name: string, state: "STOPPED" | "RUNNING", nextAt: number | null, status: "IDLE" | "ERROR" | "CREATING" = "IDLE") => {
       const dot = await seedDot(db, name);
       await db.dots.setStatus(dot.id, status);
       await db.computers.setState(dot.id, state);
@@ -288,10 +290,9 @@ describe.each(testAdapters())("repositories on %s", { timeout: SETUP_TIMEOUT }, 
     const none = await seed("due-none", "STOPPED", null);
     const running = await seed("due-running", "RUNNING", at("2030-01-01T10:00:00Z"));
     const broken = await seed("due-error", "STOPPED", at("2030-01-01T10:00:00Z"), "ERROR");
-    const disabled = await seed("due-disabled", "STOPPED", at("2030-01-01T10:00:00Z"), "DISABLED");
     const creating = await seed("due-creating", "STOPPED", at("2030-01-01T10:00:00Z"), "CREATING");
 
-    const ids = [soon, missed, later, none, running, broken, disabled, creating];
+    const ids = [soon, missed, later, none, running, broken, creating];
     const listed = (await db.computers.stoppedWithAutomationBy(new Date("2030-01-01T10:30:00Z"))).filter((id) => ids.includes(id));
     // The run that was missed comes first; the one due after the limit, the one with nothing due, the running
     // computer and the Dots the person has to look at are left alone.
@@ -314,7 +315,6 @@ describe.each(testAdapters())("repositories on %s", { timeout: SETUP_TIMEOUT }, 
     expect(await db.events.list({ dotId: dot.id, after: first!.id })).toHaveLength(1);
     expect(await db.events.list({ dotId: dot.id, types: ["computer.state"] })).toHaveLength(1);
     expect((await db.events.tail(dot.id, 1))[0]?.id).toBe(host.id);
-    expect(await db.events.latestId()).toBeGreaterThanOrEqual(host.id);
   });
 
   it("events: one task's events come by data.task_id, with the other filters, and the index serves the query", async () => {
@@ -513,7 +513,6 @@ describe.each(testAdapters())("repositories on %s", { timeout: SETUP_TIMEOUT }, 
     expect(await db.transaction((tx) => tx.tasks.claimNext())).toBeNull();
     expect(await db.tasks.hasWork(b.id, new Date())).toBe(false);
     expect(await db.tasks.hasWork(a.id, new Date())).toBe(true);
-    expect((await db.tasks.activeForDot(a.id)).map((t) => t.id)).toEqual([high.id]);
 
     // Delivered: the run says so and nothing is pending any more.
     const sent = claimed[0]!.inbound.event.id;

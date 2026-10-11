@@ -14,7 +14,6 @@ export const VM_STATES = [
   "PROVISIONING",
   "STARTING",
   "RUNNING",
-  "IDLE",
   "STOPPING",
   "STOPPED",
   "ERROR",
@@ -32,9 +31,8 @@ export type StopReason = (typeof STOP_REASONS)[number];
 /**
  * Whether the guest of a computer in this state answers: only a RUNNING computer does. The host's routes that reach
  * into the guest (screenshot, files, browser identities, tools, reboot) refuse every other state with 409
- * `computer_stopped`, and the UI draws pictures and lists only when this says so. The host stores no IDLE VM state
- * today; if it ever does, this is the one place to say whether an IDLE computer answers.
- * `COMPUTER_STOPPED` is the code of that refusal.
+ * `computer_stopped`, and the UI draws pictures and lists only when this says so. `COMPUTER_STOPPED` is the code of
+ * that refusal.
  */
 export const COMPUTER_STOPPED = "computer_stopped";
 
@@ -50,7 +48,6 @@ export const DOT_STATES = [
   "RUNNING",
   "WAITING_APPROVAL",
   "ERROR",
-  "DISABLED",
 ] as const;
 export type DotState = (typeof DOT_STATES)[number];
 
@@ -109,14 +106,6 @@ export type EventSource = (typeof EVENT_SOURCES)[number];
 
 export function isAgentState(value: unknown): value is AgentState {
   return typeof value === "string" && (AGENT_STATES as readonly string[]).includes(value);
-}
-
-export function isVmState(value: unknown): value is VmState {
-  return typeof value === "string" && (VM_STATES as readonly string[]).includes(value);
-}
-
-export function isDotState(value: unknown): value is DotState {
-  return typeof value === "string" && (DOT_STATES as readonly string[]).includes(value);
 }
 
 export function isTaskState(value: unknown): value is TaskState {

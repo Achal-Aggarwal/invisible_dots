@@ -39,6 +39,14 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+      # Linux's vitest builds the real dot-agentd and drives it with the host's GuestClient
+      # (apps/vm-manager/test/agentd.linux.test.ts, which vitest.config.ts collects on Linux only).
+      - if: runner.os == 'Linux'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: guest/dot-agentd/go.mod
+          # The module has no dependencies, so there is no go.sum to key a cache on.
+          cache: false
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - name: the pre-push hook parses
@@ -169,7 +177,7 @@ jobs:
         working-directory: guest/dot-agentd
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: guest/dot-agentd/go.mod
           # The module has no dependencies, so there is no go.sum to key a cache on.
@@ -186,7 +194,7 @@ jobs:
       - name: refuse a run with too few tests or an unexpected skip
         if: always()
         run: node ../../.github/scripts/test-guard.mjs go-test.json --suite go --floors ../../.github/test-floors.json
-      - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
+      - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
       - run: file bin/dot-agentd | tee /dev/stderr | grep -q "ELF 64-bit LSB executable, x86-64.*statically linked"
 
   engine:
@@ -217,7 +225,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      # Builds dot-agentd in golang:1.26, the engine's environment in ubuntu:24.04
+      # Builds dot-agentd in golang:1.26.8, the engine's environment in ubuntu:24.04
       # the way provision.sh builds it, and runs the Dot. It exits non-zero on a
       # failed or a skipped check and prints "SMOKE: N passed, F failed, S skipped".
       - name: run the smoke on this checkout

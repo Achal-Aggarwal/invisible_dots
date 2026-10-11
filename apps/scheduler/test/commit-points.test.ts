@@ -130,6 +130,31 @@ describe("the commit points of the host", () => {
     expect((await db.events.list({ dotId: dot.id, types: ["task.created"] }))[0]!.data.task_id).toBe(task.id);
   });
 
+  it("a task given up killed at its last write is neither FAILED nor told; given up whole, it is both", async () => {
+    const driver = new FakeDriver();
+    const killed = killedAt(db, "inbound", "drop");
+    const scheduler = make(driver, killed.db);
+    const dot = await scheduler.createDot(yaml("killed-give-up"));
+    await waitUntilSettledReady(scheduler, driver, dot.id, "killed-give-up");
+    await scheduler.lifecycle.stop(dot.id, "user");
+    driver.failNext("start", new Error("qemu-system-x86_64 exited: boom"), 3);
+    const failures = async (taskId: string) =>
+      (await db.query<{ failures: number }>("SELECT failures FROM inbound_events WHERE task_id = $1", [taskId])).rows[0]?.failures ?? 0;
+
+    killed.kill();
+    const task = await scheduler.createTask(dot.id, { description: "undeliverable" });
+    await waitFor(async () => (await failures(task.id)) >= 2, "its attempts used up");
+    await scheduler.settle();
+    expect((await db.tasks.get(task.id))?.status).toBe("RUNNING");
+    expect(await typesOf(dot.id, "task.failed")).toEqual([]);
+
+    // The next attempt gives it up whole: the state and its event in one commit.
+    killed.revive();
+    await scheduler.inbound.kick(dot.id);
+    expect((await db.tasks.get(task.id))?.status).toBe("FAILED");
+    expect(await typesOf(dot.id, "task.failed")).toEqual(["task.failed"]);
+  });
+
   it("a config killed at its save is not announced, and a saved one is, in the same commit", async () => {
     const driver = new FakeDriver();
     const killed = killedAt(db, "dots", "updateConfig");

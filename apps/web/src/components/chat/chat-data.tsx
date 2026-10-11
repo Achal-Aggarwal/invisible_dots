@@ -1,11 +1,11 @@
 "use client";
 
+import { readEventLog, readEventRange, readRecentEvents } from "@invisible-dots/sdk";
 import { MAX_EVENT_PAGE } from "@invisible-dots/shared/browser";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { buildThread, CHAT_ACTIVITY_EVENT_TYPES, isChatActivityEvent, mergeChatEvents, unsettled, type PendingMessage, type ThreadItem } from "../../lib/chat-thread";
 import { CHAT_PAGE_SIZE, withEarlierPage, withNewestPage, type ChatWindow } from "../../lib/chat-window";
-import { readEventLog, readEventRange, readRecentEvents } from "../../lib/event-log";
 import { CHAT_EVENT_TYPES } from "../../lib/messages";
 import type { ChatMessage, StoredEvent } from "../../lib/types";
 import { useLiveEvents, useLiveRefresh } from "../events";

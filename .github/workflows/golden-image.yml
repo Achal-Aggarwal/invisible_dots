@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: guest/dot-agentd/go.mod
       - name: KVM for the builder VM, and QEMU
@@ -50,7 +50,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build --workspace @invisible-dots/cli
       # The runtime ISO, which `image build` makes first, carries dot-agentd.
-      - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go -C guest/dot-agentd build -trimpath -o bin/dot-agentd ./cmd/dot-agentd
+      - working-directory: guest/dot-agentd
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
       - name: the image (downloaded instead when its release exists already)
         id: build
         run: |

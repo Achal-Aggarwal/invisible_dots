@@ -6,13 +6,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { MASTER_KEY_BYTES } from "@invisible-dots/database";
-import { DEFAULT_LISTEN, ENV, MIN_API_TOKEN_LENGTH, readApiToken, readSecretFile, writeSecretFile, type HostPaths } from "@invisible-dots/shared";
-
-/** The same variable the CLI and the web server read, so one value configures all three. */
-export const API_TOKEN_ENV = ENV.TOKEN;
-
-/** Tokens shorter than this are refused (the one rule of shared readApiToken). */
-export const MIN_TOKEN_LENGTH = MIN_API_TOKEN_LENGTH;
+import { DEFAULT_LISTEN, ENV, readApiToken, readSecretFile, writeSecretFile, type HostPaths } from "@invisible-dots/shared";
 
 /** A generated token: 32 random bytes as hex, so it survives copy and paste and any shell quoting. */
 const GENERATED_TOKEN_BYTES = 32;

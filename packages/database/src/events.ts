@@ -185,9 +185,4 @@ export class EventsRepository {
     // A float sum shows its noise (0.1 + 0.2): the engine reports to the hundred-millionth of a USD.
     return Math.round(Number(rows[0]!.usd) * 1e8) / 1e8;
   }
-
-  async latestId(): Promise<number> {
-    const { rows } = await this.q.query<{ id: number | null }>("SELECT max(id) AS id FROM events");
-    return rows[0]?.id ?? 0;
-  }
 }

@@ -50,6 +50,10 @@ export const OUTBOUND_EVENT_TYPES = [
 ] as const;
 export type OutboundEventType = (typeof OUTBOUND_EVENT_TYPES)[number];
 
+/**
+ * The host's own events. `task.failed` is also the guest's: a task fails with its error whoever ended it, the guest
+ * (its turn failed) or the host (the task could not be delivered to the Dot), so a client follows one type.
+ */
 export const HOST_EVENT_TYPES = [
   "dot.created",
   "dot.updated",
@@ -59,6 +63,7 @@ export const HOST_EVENT_TYPES = [
   "computer.stopped",
   "task.created",
   "task.cancelled",
+  "task.failed",
   "approval.resolved",
   "guest.event.refused",
   "mcp.server.refused",
@@ -75,7 +80,7 @@ export type EventType = OutboundEventType | HostEventType;
  * Every type name a row of the host event log can carry: the guest's, the host's, and the person's own
  * `user.message` (stored by the host, so it is neither). The filter of `GET /api/dots/:id/events?types=` takes these.
  */
-export const STORED_EVENT_TYPES: readonly string[] = [...OUTBOUND_EVENT_TYPES, ...HOST_EVENT_TYPES, "user.message"];
+export const STORED_EVENT_TYPES: readonly string[] = [...new Set<string>([...OUTBOUND_EVENT_TYPES, ...HOST_EVENT_TYPES, "user.message"])];
 
 export function isStoredEventType(value: unknown): value is string {
   return typeof value === "string" && STORED_EVENT_TYPES.includes(value);
@@ -229,17 +234,13 @@ export interface OutboundEventDataMap {
    * The Dot added an MCP server to its own config (`add_mcp_server`, which `mcp.servers.add` allowed or the person
    * approved): the call's arguments as it made them, `name` and the entry (`command`, `args`, `env` or `url`,
    * `headers`, and `secrets`, names only) with an optional `reason`. The host writes the server into the config only
-   * when the config allows the permission or the person approved exactly these arguments, and says so otherwise
+   * when the config allows the permission or the person approved exactly these arguments (that approval is then used
+   * up: it adds one server once), and says so otherwise
    * (`mcp.server.refused`).
    */
   "mcp.server.added": { arguments: Record<string, unknown> };
 }
 
-/**
- * Data of host events. The contract fixes only `computer.state`; the others
- * carry whatever identifies their subject, and the dot id is always the
- * event's own `dot_id` column.
- */
 /**
  * A message of the guest's event stream that the host refused: its schema did not take it, or it was not JSON. The
  * stream goes on past it and the event is not stored, so this record (the host event `guest.event.refused`) is the
@@ -255,6 +256,11 @@ export interface RefusedEvent {
 /** The longest `problem` of a refused event, in characters. */
 export const REFUSED_PROBLEM_MAX = 300;
 
+/**
+ * Data of host events. The contract fixes only `computer.state`; the others
+ * carry whatever identifies their subject, and the dot id is always the
+ * event's own `dot_id` column.
+ */
 export interface HostEventDataMap {
   "dot.created": { name: string; [key: string]: unknown };
   "dot.updated": { name: string; [key: string]: unknown };
@@ -264,6 +270,8 @@ export interface HostEventDataMap {
   "computer.stopped": Record<string, unknown>;
   "task.created": { task_id: string; description: string; priority: number };
   "task.cancelled": { task_id: string };
+  /** The host failed the task: its `task.created` could not be delivered to the Dot (`error` says why). */
+  "task.failed": { task_id: string; error: string };
   /**
    * `always` marks an approval answered with "always allow": the Dot's config now allows the permission (`dot.updated`
    * follows). `task_id` is the task the approval was asked in, when it was asked in one: the events of a task
@@ -332,16 +340,16 @@ export const inboundEventSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-/** Validate an inbound event; throws with every problem listed. */
+/** Every problem a schema found, as "path: message", separated by "; ". */
+function describeIssues(error: z.ZodError): string {
+  return error.issues.map((issue) => `${issue.path.map(String).join(".") || "<root>"}: ${issue.message}`).join("; ");
+}
+
+/** Validate an inbound event; throws with every problem listed. The schema's type is `InboundEvent` (events.test.ts). */
 export function parseInboundEvent(value: unknown): InboundEvent {
   const result = inboundEventSchema.safeParse(value);
-  if (!result.success) {
-    const detail = result.error.issues
-      .map((issue) => `${issue.path.map(String).join(".") || "<root>"}: ${issue.message}`)
-      .join("; ");
-    throw new Error(`invalid inbound event: ${detail}`);
-  }
-  return result.data as InboundEvent;
+  if (!result.success) throw new Error(`invalid inbound event: ${describeIssues(result.error)}`);
+  return result.data;
 }
 
 const outboundBase = { seq: z.number().int().positive(), id: nonEmpty, ts: isoTimestamp };
@@ -423,16 +431,14 @@ export const outboundEventSchema = z.discriminatedUnion("type", [
   z.object({ ...outboundBase, type: z.literal("mcp.server.added"), data: z.object({ arguments: z.record(z.string(), z.unknown()) }) }),
 ]);
 
-/** Validate an outbound event read from the guest stream; throws with every problem listed. */
+/**
+ * Validate an outbound event read from the guest stream; throws with every problem listed. The schema takes exactly
+ * the shapes of `OutboundEventDataMap` (events.test.ts holds them equal).
+ */
 export function parseOutboundEvent(value: unknown): OutboundEvent {
   const result = outboundEventSchema.safeParse(value);
-  if (!result.success) {
-    const detail = result.error.issues
-      .map((issue) => `${issue.path.map(String).join(".") || "<root>"}: ${issue.message}`)
-      .join("; ");
-    throw new Error(`invalid outbound event: ${detail}`);
-  }
-  return result.data as OutboundEvent;
+  if (!result.success) throw new Error(`invalid outbound event: ${describeIssues(result.error)}`);
+  return result.data;
 }
 
 export function isInboundEventType(value: unknown): value is InboundEventType {

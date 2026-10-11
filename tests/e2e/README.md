@@ -49,7 +49,7 @@ tested by `tests/repo/e2e.test.ts` on every push:
 | j | the server restarts and adopts the running VM (same pid, browser still open); `invisible-dots computer stop` reaches STOPPED with QEMU gone, through the guest's own poweroff (`computer.stopped` says `forced: false`, in well under the 60 s after which QEMU is killed); the open browser was closed on the way down (`browser.identity.closed`); `start` reaches READY with no browser server running; the identity is launched again and its `.stealth-identity.json` is unchanged (by SHA-256); `title.txt`, the note, a `grep` that finds it, and the conversation are all still there; the guest's whole system journal, read inside the guest, holds no OpenRouter key |
 | k | with `computer.exec: ask`, a task stops at an approval; the **computer is killed** (SIGKILL of QEMU) while it waits; the control plane records `computer.stopped` with `reason: exited` and starts the computer again by itself (the Dot still has a task), a second `agent.started` follows, the engine resumes from its database with the same approval pending and the host re-pushes key and config; approved with a note, the task completes and a counter file proves the command ran exactly once |
 | l | a task runs a slow `exec`; while it is in flight the computer is killed the same way; after the restart the Dot's event log has that call once, as a `tool.called` with `interrupted: true`, and once the command's time is over no copy of it is running and its marker file was never written: the command died with its computer and was not run again (architecture 8.7) |
-| m | two MCP servers in the config, both `uvx mcp-server-time`: `time`, whose permission asks, and `keyed`, which names the secret `TIME_TOKEN`. `keyed` is `failed` because its secret is not set; a task's call of `mcp_time_get_current_time` stops at an approval for `mcp.time`, approved always, and runs; `GET .../tools` lists `time` connected with its tools offered, and its process runs as `dot`. The secret is set through `invisible-dots secret mcp` (stdin, not echoed), `keyed` connects at the next turn, `invisible-dots mcp` says so, and the secret is in the server's environment and on no command line in the guest |
+| m | two MCP servers in the config, both `uvx mcp-server-time`: `time`, whose permission asks, and `keyed`, which names the secret `TIME_TOKEN`. `keyed` is `failed` because its secret is not set; a task's call of `mcp_time_get_current_time` stops at an approval for `mcp.time`, approved always, and runs; `GET .../tools` lists `time` connected with its tools offered, and its process runs as `dot`. The secret is set through `invisible-dots secret mcp` (stdin, not echoed), `keyed` connects at the next turn, `invisible-dots mcp` says so, and the secret is in the server's environment and on no command line in the guest. Then the Dot adds a third, `clock`, itself with `add_mcp_server`: the call asks under `mcp.servers.add` with the whole entry in its arguments, is approved, and `clock` is in the config (its permission not left to ask), connected, and logged as `mcp.server.added` |
 | n | the key and the MCP secret are in none of the Dot's event and approval rows (read back decompressed through the API) and, once the Dot is stopped, in none of its files: the overlay disk, the seed, the serial log and QEMU's log |
 | o | `DELETE /api/dots/:id` removes the Dot, its QEMU process and `vms/<id>` |
 | p | the key and the MCP secret are in no event row read back after the delete, and in no file of the run's logs, `logs/` or the embedded database's directory |
@@ -70,8 +70,9 @@ no permission, and ask the engine for its state through the proxy.
 The key checks report only "found" or "not found" and where, never any part
 of the key. They look for its first 12 characters; the journal check of step j
 looks inside the guest for the `sk-or-` prefix every OpenRouter key has (the run
-refuses a key without it), without giving the model any part of the key, and is
-only accepted when the guest proves it read the system journal. Large rows are
+refuses a key without it), as the user the model's commands run as (through
+dot-agentd's exec route, not by asking the model, which may refuse to search
+logs for keys), and is only accepted when the guest proves it read the system journal. Large rows are
 compressed inside the database's files, which is why step n reads them through
 the API as well as step p scanning the files. The guest's journal compresses
 large entries too, which is why step j reads it inside the guest besides step n
@@ -106,7 +107,7 @@ git clone https://github.com/feder-cr/invisible_dots && cd invisible_dots
 npm ci
 npm run build --workspace @invisible-dots/cli
 npm run build --workspace @invisible-dots/web        # skip with E2E_WEB=0
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go -C guest/dot-agentd build -trimpath -o bin/dot-agentd ./cmd/dot-agentd
+(cd guest/dot-agentd && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd)
 
 # The key goes in a file only you can read; the run never prints it.
 install -m 600 /dev/null ~/openrouter.key && $EDITOR ~/openrouter.key
@@ -146,8 +147,8 @@ device's group, as on a real host; no `--privileged`.
 ```bash
 # dot-agentd needs Go, which the host image deliberately lacks
 docker run --rm -v "$PWD/guest/dot-agentd:/src" -w /src \
-  -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -e GOFLAGS=-buildvcs=false \
-  golang:1.26 go build -trimpath -o bin/dot-agentd ./cmd/dot-agentd
+  -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
+  golang:1.26.8 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
 
 # The container's user takes your uid and gid, so it can read ~/openrouter.key (mode 0600) as you do.
 docker build -t idots-linux-host --build-arg HOST_UID="$(id -u)" --build-arg HOST_GID="$(id -g)" tests/e2e/linux-host

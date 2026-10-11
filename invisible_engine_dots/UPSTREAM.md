@@ -188,16 +188,38 @@ body or the exception's message. The provider's own handling and the base class'
 
 Kept on purpose, with the reason, for the next cut to decide:
 
-- `CronService.update_job`, `enable_job`, `run_job`, `register_system_job` and
-  `remove_system_job`: the Dot's cron tool adds, lists and removes, but the service's
-  tests drive its timer, its store and its recovery through them.
 - `_BoundedOutputBuffer.retained_chars`: the invariant that an unpolled session holds
   at most its bound is asserted through it.
-- the retry notifications of `LLMProvider` (the Dot's runs carry no event sink, so the
-  provider context has no publisher and no notification is ever sent), the spill of a
-  long tool result to a file (the Dot passes no workspace) and
-  `AgentHook`'s lifecycle methods the Dot's hook does not override: each is exercised
-  by upstream tests that pin its behavior, and none is reachable from the Dot.
+- `AgentHook`'s lifecycle methods the Dot's hook does not override: they are exercised
+  by upstream tests that pin their behavior, and none is reachable from the Dot.
+
+## What the sixth cut removed: what the Dot never reaches, and two defects
+
+- providers: a tool call written in the assistant's text (`<tool_call>{...}</tool_call>`)
+  was turned into a call and run when the response had no structured one
+  (`_extract_text_tool_calls`); only the API's `tool_calls` are calls now. Removed with
+  what no caller set: `reasoning_effort` (and with it the Kimi, MiMo and Qwen thinking
+  tables, the thinking and gateway reasoning `extra_body`, `ProviderSpec.gateway_reasoning_style`
+  and `GenerationSettings.reasoning_effort`), the constructor's `extra_headers`,
+  `extra_body`, `extra_query` and `proxy`, `LLMRuntime.model_preset`, and
+  `ProviderCallContext` with `chat_stream_with_context`, the response attribution and
+  the retry notifications (`on_retry_wait`, `on_retry_exhausted`, `on_retry_status`);
+  the retry waits are plain sleeps.
+- nanobot/events.py and the event sink of the runner and the context governor (the
+  compaction events): the Dot passes none.
+- agent/tools/execution.py: the concurrent batches (`AgentRunSpec.concurrent_tools`,
+  `Tool.read_only`, `concurrency_safe` and `exclusive`); the calls of a response run one
+  at a time, each decided by the gate before it runs.
+- the spill of a long tool result to a file (`maybe_persist_tool_result`, its buckets,
+  `AgentRunSpec.workspace`): a long result is cut to `max_tool_result_chars`.
+- agent/tools/mcp.py: a call that hit a connection error was repeated once after 1 s,
+  so a call an HTTP server had already received could run twice; it is not repeated
+  now. The reconnect machinery and `MCPServerConfig.enabled_tools` are gone:
+  `MCPProvider(on_terminated=...)` is required, and a wrapper that finds its session
+  ended reports it through the same callback as the transport's end.
+- cron: `CronService.update_job`, `enable_job`, `run_job`, `register_system_job`,
+  `remove_system_job` and the protected `system_event` jobs; the tests run jobs through
+  the timer's tick, as the Dot does.
 
 ## What was added: the Dot's layer
 
@@ -218,8 +240,7 @@ every other command). It is described in docs/architecture.md, section 8.8.
   `MCPProvider(on_terminated=...)` replaces the silent reconnect: a server whose session
   ended is reported by name and not reconnected (a restarted browser server has lost its
   browser), both when a call finds out and, through `connect_mcp_servers(on_ended=...)` and
-  the read-stream filter, when the transport ends with no call in flight. Without
-  `on_terminated` the provider reconnects as before.
+  the read-stream filter, when the transport ends with no call in flight.
   The one server is `invisible-playwright-mcp`, started by the `BrowserManager`
   (nanobot/dots/browser.py) through `dot-agentd relay`; `main.py` no longer builds an
   `MCPProvider` of its own.

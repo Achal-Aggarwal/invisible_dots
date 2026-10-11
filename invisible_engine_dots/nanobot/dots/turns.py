@@ -357,9 +357,6 @@ class TurnRunner:
             ),
             transcript_builder=builder.build_transcript,
             hook=DotsTurnHook(unit, self._host, spend),
-            concurrent_tools=False,
-            # No spill files: a long result is cut to the limit, the Dot's computer is not the engine's disk.
-            workspace=None,
             session_key=session_key,
             checkpoint_callback=commit,
             consolidate_history=partial(

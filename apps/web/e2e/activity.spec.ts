@@ -28,11 +28,11 @@ test("the Activity tab reads the log as lines, filters by family at the host, fo
   const rows = page.getByRole("list", { name: "Events" }).getByRole("listitem");
   await expect(rows.filter({ hasText: "Ran a command" })).toHaveCount(2);
   const allowed = rows.filter({ hasText: "ls -la /home/dot" });
-  await expect(allowed).toContainText("ok in 40 ms | exec [computer.exec] allow");
-  // The refused call is an error line, and says it never ran.
+  await expect(allowed).toContainText("done in 40 ms | exec [computer.exec] allow");
+  // The refused call is a warning line (the config refused it; nothing failed), and says it never ran.
   const refused = rows.filter({ hasText: "rm -rf /" });
   await expect(refused).toContainText("denied in 0 ms | exec [computer.exec] deny");
-  await expect(refused).toHaveAttribute("data-tone", "error");
+  await expect(refused).toHaveAttribute("data-tone", "warn");
   await expect(rows.filter({ hasText: "You sent a message" })).toContainText("hello there");
   // The engine's own start, in words, not as empty data.
   await expect(rows.filter({ hasText: "The engine started" })).toContainText("The key was sent again");

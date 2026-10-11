@@ -9,6 +9,10 @@
 #    declared in pyproject.toml under [tool.invisible.hooks]. That pyproject
 #    is configuration only; nothing here is a Python package.
 #
+# CI alone runs the rest of tests.yml: the engine's pytest (Linux only, see
+# invisible_engine_dots), the PostgreSQL half of the pg suites, the web
+# client's Playwright tests, the two smokes and the claims gate.
+#
 # Install once with:
 #   git config core.hooksPath .githooks
 # Bypass a known-broken WIP push with `git push --no-verify`; that is the only

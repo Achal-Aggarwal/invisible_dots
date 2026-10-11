@@ -31,7 +31,8 @@ import {
 } from "@invisible-dots/shared";
 import { guestErrorCode, guestErrorStatus, type ComputerDriver, type ComputerSpecInput, type ComputerState, type GuestApi } from "./driver.js";
 import { applyGuestEvent, dotStatusForAgent, type AppliedGuestEvent } from "./guest-events.js";
-import { ControlPlaneError, errorMessage, KeyedMutex, sleep, type Clock, type Logger } from "./support.js";
+import { abortableSleep, ControlPlaneError, errorMessage, type Clock, type Logger } from "@invisible-dots/shared";
+import { BackgroundWork, KeyedMutex } from "./support.js";
 
 export interface LifecycleOptions {
   /** How long a started VM may take to pass the READY procedure. Default 10 minutes (a first boot runs cloud-init). */
@@ -123,7 +124,7 @@ export class Lifecycle {
   readonly #ready = new Set<string>();
   readonly #pumps = new Map<string, AbortController>();
   readonly #pumpDone = new Map<string, Promise<void>>();
-  readonly #background = new Set<Promise<unknown>>();
+  readonly #background: BackgroundWork;
   #closed = false;
 
   constructor(deps: LifecycleDeps) {
@@ -132,6 +133,7 @@ export class Lifecycle {
     this.#driver = deps.driver;
     this.#clock = deps.clock;
     this.#log = deps.logger;
+    this.#background = new BackgroundWork(this.#log);
     this.#opts = { ...DEFAULT_LIFECYCLE_OPTIONS, ...deps.options };
     this.#onWorkPossible = deps.onWorkPossible ?? (() => {});
     this.#onReady = deps.onReady ?? (() => {});
@@ -244,7 +246,7 @@ export class Lifecycle {
       const dot = await tx.dots.get(dotId);
       await tx.computers.setProcess(dotId, null);
       await tx.computers.setState(dotId, "STOPPED", null, reason);
-      if (dot && !(keepFailedDot && (dot.status === "DISABLED" || dot.status === "ERROR"))) await tx.dots.setStatus(dotId, "IDLE", null);
+      if (dot && !(keepFailedDot && dot.status === "ERROR")) await tx.dots.setStatus(dotId, "IDLE", null);
     });
   }
 
@@ -631,14 +633,21 @@ export class Lifecycle {
    * an agent that restarted and lost its key): push both to a READY guest
    * now. A Dot that is not READY gets them from its READY procedure, which
    * sees the change through the generation and pushes again if it was
-   * already past its own push. True when this call pushed.
+   * already past its own push. True when this call pushed. A push that fails
+   * may mean the guest is gone, so the Dot is suspect (`markSuspect`): its next
+   * delivery checks READY again, which pushes both again.
    */
   async syncGuest(dotId: string): Promise<boolean> {
     this.#generation.set(dotId, this.#generationOf(dotId) + 1);
     if (!this.#ready.has(dotId)) return false;
     return this.#pushes.run(dotId, async () => {
       if (!this.#ready.has(dotId)) return false;
-      await this.#push(dotId, await this.guest(dotId));
+      try {
+        await this.#push(dotId, await this.guest(dotId));
+      } catch (error) {
+        this.markSuspect(dotId);
+        throw error;
+      }
       return true;
     });
   }
@@ -652,22 +661,14 @@ export class Lifecycle {
     this.#ready.delete(dotId);
   }
 
-  #runInBackground(what: string, dotId: string, work: () => Promise<unknown>): void {
-    if (this.#closed) return;
-    const tracked: Promise<unknown> = work()
-      .catch((error) => this.#log.error(`${what} failed`, { dotId, error: errorMessage(error) }))
-      .finally(() => this.#background.delete(tracked));
-    this.#background.add(tracked);
-  }
-
   /** Whether work this class started in the background is still running. */
   get busy(): boolean {
-    return this.#background.size > 0;
+    return this.#background.busy;
   }
 
   /** Wait for the work this class started in the background (tests and shutdown). */
   async settle(): Promise<void> {
-    while (this.#background.size > 0) await Promise.allSettled([...this.#background]);
+    await this.#background.settle();
   }
 
   #startPump(dotId: string): void {
@@ -713,10 +714,10 @@ export class Lifecycle {
         this.#log.warn("event pump failed, retrying", { dotId, error: errorMessage(error), retryMs: delay });
       }
       if (await this.#qemuGone(dotId)) {
-        this.#runInBackground("recording a VM that stopped by itself", dotId, () => this.#exited(dotId));
+        this.#background.run("recording a VM that stopped by itself", dotId, () => this.#exited(dotId));
         return;
       }
-      await sleep(delay, signal);
+      await abortableSleep(delay, signal);
       delay = Math.min(delay * 2, this.#opts.pumpMaxRetryMs);
     }
   }
@@ -749,7 +750,7 @@ export class Lifecycle {
     });
     if (recorded && (await this.keepsAwake(dotId))) {
       this.#log.info("the Dot still has work, starting its computer again", { dotId });
-      this.#runInBackground("restart after an unexpected stop", dotId, () => this.ensureReady(dotId));
+      this.#background.run("restart after an unexpected stop", dotId, () => this.ensureReady(dotId));
     }
   }
 
@@ -786,25 +787,11 @@ export class Lifecycle {
     if (applied.taskSettled) this.#onWorkPossible();
     if (applied.reconfigured) {
       // The Dot added an MCP server to its config: the guest gets the config (and the secrets it names) now.
-      this.#runInBackground("pushing the config with the MCP server the Dot added", dotId, async () => {
-        try {
-          await this.syncGuest(dotId);
-        } catch (error) {
-          this.markSuspect(dotId);
-          throw error;
-        }
-      });
+      this.#background.run("pushing the config with the MCP server the Dot added", dotId, () => this.syncGuest(dotId));
     }
     if (stored && event.type === "agent.started") {
       // The agent process restarted inside a running VM: it lost the key it keeps in memory.
-      this.#runInBackground("pushing the key again after an agent restart", dotId, async () => {
-        try {
-          await this.syncGuest(dotId);
-        } catch (error) {
-          this.markSuspect(dotId);
-          throw error;
-        }
-      });
+      this.#background.run("pushing the key again after an agent restart", dotId, () => this.syncGuest(dotId));
     }
     return stored;
   }
@@ -882,6 +869,7 @@ export class Lifecycle {
   /** Stop every pump and release the driver's host resources. VMs keep running. */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#background.close();
     for (const controller of this.#pumps.values()) controller.abort();
     await Promise.all(this.#pumpDone.values());
     await this.settle();

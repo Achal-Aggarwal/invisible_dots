@@ -23,12 +23,12 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.mcp import _normalize_schema_for_openai
 from nanobot.dots.browser import (
+    SERVER_INTERFACE,
     BrowserIdentity,
     BrowserIdentityError,
     BrowserManager,
@@ -40,9 +40,6 @@ from nanobot.dots.identity_rules import IDENTITY_ID_MAX
 from nanobot.dots.images import ToolImage, current_turn_images, placeholder, show_images
 from nanobot.dots.store import iso_from_ms
 
-# What invisible-playwright-mcp tells a model, at the version the image installs: written from the real server by
-# guest/image-builder/builder/capture-mcp-interface.py, and a test holds its version to the lock's.
-SERVER_INTERFACE: Mapping[str, Any] = json.loads(Path(__file__).with_name("invisible_playwright_mcp.json").read_bytes())
 # The server's instructions, which the system prompt carries as an MCP host carries them (context.py).
 INSTRUCTIONS: str = SERVER_INTERFACE["instructions"]
 
@@ -66,12 +63,11 @@ _OPEN_IDENTITY_ID = {
 
 @dataclass(frozen=True)
 class ServerTool:
-    """One tool of invisible-playwright-mcp as the server serves it: name, description, input schema, read-only."""
+    """One tool of invisible-playwright-mcp as the server serves it: name, description, input schema."""
 
     name: str
     description: str
     input_schema: Mapping[str, Any]
-    read_only: bool
 
 
 # The server's tools by name, as captured.
@@ -80,7 +76,6 @@ SERVER_TOOLS: Mapping[str, ServerTool] = {
         tool["name"],
         tool.get("description") or tool["name"],
         tool.get("inputSchema") or {"type": "object", "properties": {}},
-        bool((tool.get("annotations") or {}).get("readOnlyHint")),
     )
     for tool in SERVER_INTERFACE["tools"]
 }
@@ -135,10 +130,6 @@ class BrowserIdentityListTool(_BrowserTool):
             "List the browser identities of this Dot: each is a separate browser profile with its own cookies, "
             "logins and fingerprint. Shows whether each is open, and how many may be open at once."
         )
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -291,10 +282,6 @@ class BrowserPageTool(_BrowserTool):
         return self._tool.description
 
     @property
-    def read_only(self) -> bool:
-        return self._tool.read_only
-
-    @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
 
@@ -326,10 +313,6 @@ class ComputerScreenshotTool(Tool):
     @property
     def description(self) -> str:
         return "Take a screenshot of the Dot's whole desktop and look at it: its windows, open programs and browsers."
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     @property
     def parameters(self) -> dict[str, Any]:

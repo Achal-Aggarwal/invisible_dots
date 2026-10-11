@@ -1,7 +1,6 @@
 "use client";
 
-import { computerIsUp, type PermissionDecision, type PermissionRisk } from "@invisible-dots/shared/browser";
-import { RISK_LABEL } from "../../lib/approval-view";
+import { computerIsUp, RISK_LABEL, type PermissionDecision, type PermissionRisk } from "@invisible-dots/shared/browser";
 import { setPermission } from "../../lib/config-fields";
 import { DECISION_LABEL, DECISION_MEANING, DECISIONS, permissionGroups, type PermissionRow } from "../../lib/permission-table";
 import { cn } from "../../lib/utils";

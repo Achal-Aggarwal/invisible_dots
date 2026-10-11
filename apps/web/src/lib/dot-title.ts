@@ -4,6 +4,7 @@
  * so the Dot's name is asked of the control plane there, with the web server's own credential, and only for a request
  * that reaches this server (it listens where the Dots' VMs cannot reach it, section 9.7). Anything that goes wrong leaves the title the tab alone.
  */
+import { InvisibleDotsClient } from "@invisible-dots/sdk";
 import type { Metadata } from "next";
 import { apiBaseUrl, loadApiToken } from "./proxy";
 
@@ -12,14 +13,14 @@ const NAME_TIMEOUT_MS = 2000;
 
 export async function dotPageTitle(dotIdOrName: string, tab: string): Promise<Metadata> {
   try {
-    const token = await loadApiToken();
-    const answer = await fetch(`${apiBaseUrl()}/api/dots/${encodeURIComponent(dotIdOrName)}`, {
-      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(NAME_TIMEOUT_MS),
+    const client = new InvisibleDotsClient({
+      baseUrl: apiBaseUrl(),
+      token: await loadApiToken(),
+      timeoutMs: NAME_TIMEOUT_MS,
+      // A Dot can be renamed: an answer Next kept would show the old name.
+      fetch: (url, init) => fetch(url, { ...init, cache: "no-store" }),
     });
-    if (!answer.ok) return { title: tab };
-    const { name } = (await answer.json()) as { name?: unknown };
+    const { name } = await client.getDot(dotIdOrName);
     return { title: typeof name === "string" && name !== "" ? `${tab} - ${name}` : tab };
   } catch {
     return { title: tab };

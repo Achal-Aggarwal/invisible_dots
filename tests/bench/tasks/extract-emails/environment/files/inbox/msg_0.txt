@@ -1,6 +1,0 @@
-(team.lead@example.com), thanks
-Contact: support@acme.io.
-(j_smith@example.com), thanks
-Write to j_smith@mail.co.uk for details.
-Write to j_smith@mail.co.uk for details.
-not-an-email@ and @nobody here

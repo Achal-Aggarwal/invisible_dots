@@ -1,7 +1,7 @@
 "use client";
 
 import { agentStateLabel, type AgentStateValue } from "../../lib/agent";
-import type { ApprovalStep, ToolStep } from "../../lib/chat-thread";
+import type { ApprovalStep, ToolStep } from "../../lib/steps";
 import type { RingState } from "../../lib/attention";
 import { DotAvatar } from "../shell/DotAvatar";
 

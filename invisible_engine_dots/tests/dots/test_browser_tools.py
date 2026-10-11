@@ -170,7 +170,6 @@ def test_a_page_tool_says_what_the_server_says_and_takes_what_it_takes_and_the_i
     assert list(offered.parameters["properties"]) == ["identity_id", *served.input_schema.get("properties", {})]
     assert offered.parameters["required"] == ["identity_id", *served.input_schema.get("required", [])]
     assert "browser_identity_launch" in offered.parameters["properties"]["identity_id"]["description"]
-    assert offered.read_only == served.read_only
 
 
 async def test_the_model_cannot_choose_another_browser(env: Env) -> None:

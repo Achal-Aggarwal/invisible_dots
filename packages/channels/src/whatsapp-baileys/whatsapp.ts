@@ -19,7 +19,7 @@
  *   hub could not record is lost: the connection is dropped, the channel shows `error`, and the person writes again.
  */
 import type { ChannelBindingRecord } from "@invisible-dots/database";
-import { errorMessage } from "@invisible-dots/scheduler";
+import { abortableSleep, errorMessage } from "@invisible-dots/shared";
 import { approvalReplyHint } from "../approval-text.js";
 import {
   ChannelNeedsRelinkError,
@@ -51,7 +51,6 @@ const MAX_RESTARTS = 3;
 const UNREAD_MAX = 500;
 
 const defaultPause = () => 400 + Math.random() * 1100;
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 interface Identity {
   peerId: string;
@@ -153,7 +152,7 @@ class WhatsAppChannel implements Channel {
       await connection.markRead(unread).catch(() => {});
     }
     await connection.typing(chatId).catch(() => {});
-    await sleep(this.pauseMs());
+    await abortableSleep(this.pauseMs());
     return connection.sendText(chatId, text);
   }
 

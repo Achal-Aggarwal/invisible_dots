@@ -6,8 +6,7 @@
  * and a stop closes the web client first, then the control plane.
  */
 import type { ListenAddress, ListenSetting, StartServerOptions } from "@invisible-dots/api";
-import { DEFAULT_WEB_LISTEN, ENV, type HostPaths } from "@invisible-dots/shared";
-import type { Logger } from "@invisible-dots/vm-manager";
+import { DEFAULT_WEB_LISTEN, ENV, type HostPaths, type Logger } from "@invisible-dots/shared";
 import { locateWebBuild, type WebServer, type WebServerOptions } from "./web.js";
 
 /** What `serve` needs from the packages that own the processes; tests pass fakes. */

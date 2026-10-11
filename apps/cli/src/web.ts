@@ -7,7 +7,7 @@
  */
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { allowlistedEnvironment, BASE_CHILD_ENV_VARS, ENV } from "@invisible-dots/shared";
+import { abortableSleep, allowlistedEnvironment, BASE_CHILD_ENV_VARS, ENV } from "@invisible-dots/shared";
 import { startProcess, WEB_BUILD_COMMAND, type StartedProcess, type StartProcessOptions, type WebBuild } from "@invisible-dots/vm-manager";
 
 /**
@@ -97,18 +97,6 @@ function answers(url: string): Promise<boolean> {
   );
 }
 
-function sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    function done() {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve();
-    }
-    signal?.addEventListener("abort", done, { once: true });
-  });
-}
-
 /**
  * Start the web server and resolve once it answers a request. Throws
  * WebStartError, with the child already gone, when the build is incomplete,
@@ -167,7 +155,7 @@ export async function startWebServer(options: WebServerOptions): Promise<WebServ
         started = true;
         return { url, stop };
       }
-      await sleep(READY_POLL_MS, options.signal);
+      await abortableSleep(READY_POLL_MS, options.signal);
     }
   } catch (error) {
     await stop();

@@ -104,21 +104,17 @@ describe("the tasks that failed lately", () => {
     expect(failedRecently({ status: "FAILED", finished_at: new Date(now + 3_600_000).toISOString() }, now)).toBe(false);
   });
 
-  it("are read from every Dot's tasks, newest failure first, and a Dot that cannot be read is counted, not hidden", async () => {
-    const tasksOf: Record<string, ReturnType<typeof taskRecord>[]> = {
-      d1: [taskRecord("a", { dot_id: "d1", status: "FAILED", finished_at: ago(3_600_000) }), taskRecord("fine", { dot_id: "d1", status: "COMPLETED", finished_at: ago(1) })],
-      d2: [taskRecord("b", { dot_id: "d2", status: "FAILED", finished_at: ago(60_000) }), taskRecord("stale", { dot_id: "d2", status: "FAILED", finished_at: ago(2 * FAILED_WINDOW_MS) })],
-    };
+  it("are read in one request for every Dot: the tasks that failed within the window, as the host orders them", async () => {
+    const failed = [taskRecord("b", { dot_id: "d2", status: "FAILED", finished_at: ago(60_000) }), taskRecord("a", { dot_id: "d1", status: "FAILED", finished_at: ago(3_600_000) })];
+    const asked: [string, string][] = [];
     const client = {
-      listTasks: async (id: string) => {
-        if (id === "broken") throw new Error("down");
-        return tasksOf[id] ?? [];
+      endedTasks: async (status: "COMPLETED" | "FAILED" | "CANCELLED", after: Date) => {
+        asked.push([status, after.toISOString()]);
+        return failed;
       },
     };
-    const loaded = await loadFailedTasks(client, [{ id: "d1" }, { id: "d2" }, { id: "broken" }], now);
-    expect(loaded.tasks.map((task) => task.id)).toEqual(["b", "a"]);
-    expect(loaded.unread).toBe(1);
-    expect(await loadFailedTasks(client, [], now)).toEqual({ tasks: [], unread: 0 });
+    expect(await loadFailedTasks(client, now)).toEqual(failed);
+    expect(asked).toEqual([["FAILED", new Date(now - FAILED_WINDOW_MS).toISOString()]]);
   });
 
   it("leave the Inbox when they are dismissed, and when a day has passed since they failed", () => {

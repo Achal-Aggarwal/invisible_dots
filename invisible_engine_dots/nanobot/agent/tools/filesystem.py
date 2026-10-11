@@ -127,10 +127,6 @@ class ReadFileTool(_FsTool):
             "Text is line-numbered; use offset/limit for targeted ranges."
         )
 
-    @property
-    def read_only(self) -> bool:
-        return True
-
     async def execute(
         self,
         path: str | None = None,
@@ -870,10 +866,6 @@ class ListDirTool(_FsTool):
             "Set recursive=true to explore nested structure. "
             "Common noise directories (.git, node_modules, __pycache__, etc.) are auto-ignored."
         )
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     async def execute(
         self, path: str | None = None, recursive: bool = False,

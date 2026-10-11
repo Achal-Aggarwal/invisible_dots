@@ -53,7 +53,7 @@ describe.each(testAdapters())("approvals over a channel, with the real Scheduler
       ["20", id],
     ]);
     expect(channel.prompts[0]!.text).toBe(
-      ["The Dot asks to use exec (permission browser.identity.delete).", "Reason: the tool needs approval", 'Arguments: {"identity_id":"shop-abc123"}'].join("\n"),
+      ["The Dot wants to run a command.", "Permission: Delete browser identities (high risk)", "Reason: the tool needs approval", 'Arguments: {"identity_id":"shop-abc123"}'].join("\n"),
     );
     // A prompt is recorded once its chat took it, so the record follows the channel.
     const bindingId = (await db.channels.listBindings(dot.id))[0]!.id;
@@ -69,7 +69,7 @@ describe.each(testAdapters())("approvals over a channel, with the real Scheduler
     await hub.setSettings(dot.id, "telegram", { show_arguments: false });
     const id = await ask(w, dot);
     await waitFor(() => channel.prompts.length === 1, "the prompt");
-    const question = ["The Dot asks to use exec (permission browser.identity.delete).", "Reason: the tool needs approval"].join("\n");
+    const question = ["The Dot wants to run a command.", "Permission: Delete browser identities (high risk)", "Reason: the tool needs approval"].join("\n");
     expect(channel.prompts[0]!.text).toBe(question);
     expect(await channel.press(id, "approve", "10")).toBe("Approved.");
     await waitFor(() => channel.edits.length === 1, "the edit");

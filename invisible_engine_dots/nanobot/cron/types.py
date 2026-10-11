@@ -57,7 +57,7 @@ class CronSchedule:
 @dataclass
 class CronPayload:
     """What to do when the job runs."""
-    kind: Literal["system_event", "agent_turn"] = "agent_turn"
+    kind: Literal["agent_turn"] = "agent_turn"
     message: str = ""
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronPayload:

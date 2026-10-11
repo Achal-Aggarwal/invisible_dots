@@ -10,13 +10,12 @@ import {
   isPermissionName,
   mcpServerOf,
   permissionInfo as sharedPermissionInfo,
+  toolLabel,
   type PermissionInfo,
   type PermissionName,
-  type PermissionRisk,
   type ToolInfo,
 } from "@invisible-dots/shared/browser";
 import { additionDiff, replacementDiff, type DiffLine } from "./diff";
-import { toolLabel } from "./events/tool-labels";
 import { formatDate } from "./format";
 import type { Approval } from "./types";
 
@@ -102,8 +101,6 @@ export function permissionInfo(permission: string): (PermissionInfo & { permissi
   const info = sharedPermissionInfo(permission);
   return info !== null && isPermissionName(permission) ? { ...info, permission } : null;
 }
-
-export const RISK_LABEL: Record<PermissionRisk, string> = { low: "Low risk", medium: "Medium risk", high: "High risk" };
 
 /** The question: what the Dot wants to do, as the engine's table words it. */
 export function askTitle(ask: ApprovalAsk): string {

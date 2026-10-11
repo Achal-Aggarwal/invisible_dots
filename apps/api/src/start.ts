@@ -16,8 +16,8 @@ import {
 } from "@invisible-dots/channels";
 import type { Database } from "@invisible-dots/database";
 import type { HostFacts } from "@invisible-dots/sdk/types";
-import { errorMessage, prefixedStderrLogger, Scheduler, type ComputerDriver, type Logger, type SchedulerOptions } from "@invisible-dots/scheduler";
-import { ensureDir, ENV, hostPaths, type HostPaths } from "@invisible-dots/shared";
+import { Scheduler, type ComputerDriver, type SchedulerOptions } from "@invisible-dots/scheduler";
+import { ensureDir, ENV, errorMessage, hostPaths, type HostPaths, type Logger, prefixedStderrLogger } from "@invisible-dots/shared";
 import { hostDoctorDeps, openRouterCheck, runDoctor, type DoctorDeps } from "@invisible-dots/vm-manager";
 import { loadOrCreateApiToken, loadOrGenerateMasterKey, parseListen, saveMasterKey, type ListenAddress } from "./config.js";
 import { assertNothingEncrypted, openControlPlaneDatabase } from "./database.js";

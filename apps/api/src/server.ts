@@ -6,13 +6,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { TELEGRAM_TOKEN_SECRET, type ChannelHub } from "@invisible-dots/channels";
 import { StreamOverflowError } from "@invisible-dots/events";
-import { ControlPlaneError, errorMessage, silentLogger, type Logger, type Scheduler } from "@invisible-dots/scheduler";
+import { type Scheduler } from "@invisible-dots/scheduler";
 import { STREAM_ERROR_EVENT } from "@invisible-dots/sdk";
 import type {
   ApprovalsAnswer,
   ChannelPairingAnswer,
   ChannelRecord,
   ChannelsAnswer,
+  EveryChannelAnswer,
   DoctorAnswer,
   DotsAnswer,
   EventsAnswer,
@@ -24,27 +25,14 @@ import type {
   TasksAnswer,
   UsageAnswer,
 } from "@invisible-dots/sdk/types";
-import {
-  APPROVAL_LIST_LIMIT,
-  CONVERSATION_LIST_LIMIT,
-  APPROVAL_STATUSES,
-  CHANNEL_KINDS,
-  LIST_ORDERS,
-  MAX_EVENT_PAGE,
-  TASK_LIST_LIMIT,
-  type ApprovalStatus,
-  type ChannelKind,
-  type DoctorCheck,
-  type ListOrder,
-  type SkillListAnswer,
-  type McpSecretsAnswer,
-  type ToolListAnswer,
-} from "@invisible-dots/shared";
+import { APPROVAL_LIST_LIMIT, APPROVAL_STATUSES, type ApprovalStatus, CHANNEL_KINDS, type ChannelKind, ControlPlaneError, CONVERSATION_LIST_LIMIT, type DoctorCheck, errorMessage, LIST_ORDERS, type ListOrder, type Logger, MAX_EVENT_PAGE, type McpSecretsAnswer, silentLogger, type SkillListAnswer, TASK_LIST_LIMIT, type ToolListAnswer } from "@invisible-dots/shared";
 import { doctorAnswer } from "@invisible-dots/vm-manager";
 import { serveFile } from "./file-types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import apiPackage from "../package.json" with { type: "json" };
 
-export const API_VERSION = "0.1.0";
+/** The version `GET /api/health` reports: this package's, as the CLI's `--version` reports its own. */
+export const API_VERSION: string = apiPackage.version;
 
 /** A comment line on idle SSE connections, so proxies and clients see the connection is alive. */
 export const SSE_HEARTBEAT_MS = 15_000;
@@ -224,9 +212,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   // Messages and tasks
 
   app.post<{ Params: Params }>("/api/dots/:id/messages", async (request, reply) => {
-    const text = bodyOf(request).text;
-    if (typeof text !== "string") throw bad("text must be a string");
-    return reply.code(202).send(await scheduler.sendMessage(request.params.id, text));
+    return reply.code(202).send(await scheduler.sendMessage(request.params.id, bodyOf(request).text));
   });
 
   // The conversation pages like the event log: oldest first by default, `order=desc` the newest, `before` (the
@@ -260,6 +246,11 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     if (before !== undefined && (typeof before !== "string" || before === "")) throw bad("before must be the id of a task");
     return { tasks: await scheduler.listTasks(request.params.id, { limit, before }) };
   });
+
+  // The tasks of every Dot that ended in a state after a time, the latest end first (the web's failed tasks of the day).
+  app.get<{ Querystring: { status?: unknown; finished_after?: unknown } }>("/api/tasks", async (request): Promise<TasksAnswer> => ({
+    tasks: await scheduler.listEndedTasks(request.query.status, request.query.finished_after),
+  }));
 
   app.get<{ Params: Params }>("/api/tasks/:id", async (request) => scheduler.getTask(request.params.id));
 
@@ -343,6 +334,9 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     async (request): Promise<ChannelsAnswer> => ({ channels: await channels.list(request.params.id), available: channels.kinds }),
   );
 
+  // Every channel of every Dot, each with its Dot's id (the web's shell watches the ones that need the person).
+  app.get("/api/channels", async (): Promise<EveryChannelAnswer> => ({ channels: await channels.listEvery() }));
+
   // Link the Dot to a Telegram bot, or give the linked one a new token (a revoked token is the only way back from needs_relink).
   app.put<{ Params: Params }>("/api/dots/:id/channels/telegram", async (request, reply): Promise<ChannelRecord> => {
     const token = bodyOf(request).token;
@@ -413,12 +407,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   for (const decision of ["approve", "reject"] as const) {
     app.post<{ Params: Params }>(`/api/approvals/:id/${decision}`, async (request) => {
       const { note, always } = bodyOf(request);
-      if (note !== undefined && typeof note !== "string") throw bad("note must be a string");
-      if (always !== undefined && always !== true) throw bad("always must be true");
-      return scheduler.resolveApproval(request.params.id, decision, {
-        ...(note !== undefined ? { note } : {}),
-        ...(always !== undefined ? { always } : {}),
-      });
+      return scheduler.resolveApproval(request.params.id, decision, { note, always });
     });
   }
 
@@ -476,12 +465,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   });
 
   app.get<{ Querystring: { dot_id?: string; after?: string } }>("/api/stream", async (request, reply) => {
-    let dotId: string | undefined;
-    if (request.query.dot_id) {
-      const dot = await scheduler.db.dots.resolve(request.query.dot_id);
-      if (!dot && !request.query.dot_id.includes("_")) throw new ControlPlaneError(404, "not_found", `Dot "${request.query.dot_id}" not found`);
-      dotId = dot?.id ?? request.query.dot_id;
-    }
+    const dotId = request.query.dot_id ? await scheduler.historyDotId(request.query.dot_id) : undefined;
     // EventSource sends the last id it saw when it reconnects; it wins over the query.
     const lastEventId = request.headers["last-event-id"];
     const after = intParam(typeof lastEventId === "string" ? lastEventId : request.query.after, "after");

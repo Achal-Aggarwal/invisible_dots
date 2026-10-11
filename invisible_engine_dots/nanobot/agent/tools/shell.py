@@ -118,10 +118,6 @@ class ExecTool(Tool):
             "in /home/dot/workspace unless working_dir says otherwise."
         )
 
-    @property
-    def exclusive(self) -> bool:
-        return True
-
     def _resolve_timeout(self, timeout: int | None) -> int | None:
         """The hard timeout in seconds, None for no limit.
 

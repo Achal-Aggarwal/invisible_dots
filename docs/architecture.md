@@ -104,14 +104,16 @@ invisible_engine_dots/
                    nanobot (HKUDS/nanobot, MIT, commit f75470e7), Python 3.11 or newer, provenance
                    and everything removed since the import in invisible_engine_dots/UPSTREAM.md.
                    Import package `nanobot`, distribution `invisible-dots-engine`. Only
-                   the engine core is kept: no channel, web UI, TUI, audio, pairing, skill,
-                   subagent, web tool or CLI (the one entry point answers `--version` and refuses
-                   every other command). What it carries: nanobot's tool-calling turn runner,
-                   chat completions to OpenRouter and no other provider, the tools of the
-                   permission table (section 8.8), nanobot's cron service and its MCP client
-                   (which serves only the Dot's browsers, `invisible-playwright-mcp`, through
-                   the `BrowserManager`). The Dot's own layer, the contract of sections 5.3
-                   to 5.4, is `nanobot/dots/`. Its own pytest suite runs in CI's `engine` job
+                   the engine core is kept: no channel, web UI, TUI, audio, pairing, nanobot
+                   skill machinery, subagent, web tool or CLI (the one entry point answers
+                   `--version` and refuses every other command). What it carries: nanobot's
+                   tool-calling turn runner, chat completions to OpenRouter and no other
+                   provider, the tools of the permission table (section 8.8), nanobot's cron
+                   service and its MCP client (which serves the Dot's browsers,
+                   `invisible-playwright-mcp`, through the `BrowserManager`, and the MCP servers
+                   the person declares, through `nanobot/dots/mcp_servers.py`). The Dot's own
+                   layer, the contract of sections 5.3 to 5.4, its skills (section 8.6,
+                   `nanobot/dots/skills.py`) included, is `nanobot/dots/`. Its own pytest suite runs in CI's `engine` job
                    (`.github/workflows/tests.yml`, Linux only: unix sockets)
 virtualization/
   qemu/            the pinned QEMU version for Windows setup (installer URL + SHA-256) and argv notes
@@ -123,6 +125,8 @@ tests/
   e2e/             the real-VM acceptance run (`node tests/e2e/run.ts`, on a Linux host with an
                    accelerator and an OpenRouter key; not in CI), its stand-in Linux host for
                    machines that cannot run it directly, and README.md
+  bench/           the agent benchmark on real Dots (Harbor tasks, written by its generators before
+                   every run, and LongMemEval), run by hand in a container; README.md
 docs/
 ```
 
@@ -135,8 +139,7 @@ npm workspace. `invisible_engine_dots/` is not part of it: it is a Python projec
 vitest run and npm workspaces all leave `invisible_engine_dots/` out
 (`tests/repo/vendored-nanobot.test.ts` checks it). It is a hard fork: it is
 changed in place and upstream changes are never merged. `dot-agentd`
-is a Go module. Node 24 or newer for the TypeScript (the earlier guest agent
-uses the built-in `node:sqlite`). Go 1.25 or newer. Python 3.11 or newer for
+is a Go module. Node 24 or newer for the TypeScript. Go 1.25 or newer. Python 3.11 or newer for
 the engine; the guest runs it on Ubuntu 24.04's CPython 3.12.
 
 The control plane runs as ONE process (`invisible-dots server`) that composes
@@ -279,21 +282,27 @@ QEMU on the same disk would corrupt it.
   `invisible-playwright-mcp`, transitive packages included, by
   `guest/image-builder/builder/mcp-requirements.lock`, every package at an
   exact version with the SHA-256 of its files. The builder installs it with
-  `uv pip install --require-hashes`, so nothing is resolved from the index at
-  build time; the lock is the one place the two top-level versions are
+  `uv pip install --require-hashes --only-binary :all:`, so nothing is
+  resolved from the index at build time and no package's build script runs;
+  the lock is the one place the two top-level versions are
   written, and it is part of the inputs digest, so a changed transitive
-  package is a new image. apt packages are not pinned by version; apt checks
-  their signatures.
+  package is a new image. The apt packages come from the Ubuntu archive as it
+  was at the moment `apt_snapshot` of `pins.json` names (snapshot.ubuntu.com,
+  `apt-get --snapshot`), so they and their dependencies are the same on any day
+  of the build; apt checks their signatures.
 - The **runtime disk** (`runtime-<version>.iso`, attached read-only to every VM
   and mounted at `/opt/invisible-dots`) carries our code: the engine's source,
   the `dot-agentd` binary and the systemd units. A new
   version of our code is a new ISO and a VM restart, not a new golden image and
   not a rebuilt overlay.
 
-Neither image is ever published by this project: the host builds both from
-public sources (`invisible-dots image build`, code in `guest/image-builder/`),
-with the same QEMU it runs Dots with and the same machine: the builder VM's
-command line is built from the vm-manager's `machineArgs()`, drive and device
+The host builds the runtime disk from this checkout, and the golden image from
+public sources (`invisible-dots image build`, code in `guest/image-builder/`)
+unless CI has published the golden image of exactly the same inputs: the
+release `golden-<inputs digest>` of `.github/workflows/golden-image.yml`,
+which `image build` downloads instead (`guest/image-builder/src/prebuilt.ts`;
+section 11.3). Either way the golden image is provisioned with the same QEMU a
+host runs Dots with and the same machine: the builder VM's command line is built from the vm-manager's `machineArgs()`, drive and device
 functions, the ones `qemuArgs()` uses, plus only what a builder needs, so a
 golden image is provisioned on the machine type, accelerator and CPU model a
 Dot boots it on. The seed and runtime ISO labels are each defined once, in
@@ -866,11 +875,13 @@ guest's report: it is never used to enforce anything (the cap is the guest's).
 
 `mcp.server.added {arguments}` is a call of `add_mcp_server` that ran (section 8.3): the Dot adds an MCP server to its
 own config, and `arguments` are the call's, as the model made it. The config is the host's, so the host decides
-again: it writes the server only when the Dot's config allows `mcp.servers.add`, or when the person approved a call
-of exactly these arguments (an approval of the Dot with that tool, compared key by key in any order), and only when
-the entry passes the config's own schema under a name not yet declared. It writes it in the transaction that stores
-the event, with `dot.updated {name, mcp_server_added}`, and pushes the config; otherwise it logs
-`mcp.server.refused {name, reason}`. The server's own permission is left to its default, ask.
+again: it writes the server only when the entry passes the config's own schema under a name not yet declared, and
+the Dot's config allows `mcp.servers.add` or the person approved a call of exactly these arguments (an approval of the
+Dot with that tool, its arguments equal as JSON values, keys in any order). That approval is used up in the same
+transaction (`approvals.used_at`), so one approval adds one server once: a server the person removes is not brought
+back by the call that added it. It writes the server in the transaction that stores the event, with `dot.updated
+{name, mcp_server_added, approval_id?}`, and pushes the config; otherwise it logs `mcp.server.refused {name, reason}`
+(a call refused for its entry or its name keeps its approval). The server's own permission is left to its default, ask.
 
 `memory.updated {conversations, changed}` ends a memory pass (section 8.6): the
 Dot had been quiet for a while, and the summary model rewrote its `MEMORY.md`
@@ -914,7 +925,9 @@ The control plane adds its own: `dot.created`, `dot.updated` (a saved config,
 `{name}`, or a Dot that went to ERROR, `{name, status: "ERROR", error}`, which
 the Activity page tells apart), `dot.deleted`,
 `computer.state {state}`, `computer.started`, `computer.stopped`,
-`task.created`, `task.cancelled`, `approval.resolved {approval_id, decision,
+`task.created`, `task.cancelled`, `task.failed {task_id, error}` (the guest's
+type: the host writes it when it gives a task up because its `task.created` could not
+be delivered, section 9.2, so a client follows one type whoever ended the task), `approval.resolved {approval_id, decision,
 task_id?, note?, always?}` (`task_id` is the task the approval was asked in, so
 the events of a task hold the answer beside the request), and the two of a messaging
 channel: `channel.status {kind, status, detail?}` (`kind` is `telegram` or
@@ -979,7 +992,7 @@ ignores anything else.
   identity proxy's. An identity proxy is not the way to give a browser a
   location: a Dot that should appear somewhere gets that from its VM's egress.
 - An identity is a row of the engine's `dots_browser_identities` table (id,
-  name, proxy, created, last used, archived) and a directory under
+  name, proxy, created, last used) and a directory under
   `/home/dot/browsers/<identity_id>/`. Its id is a slug of its name plus a short
   random suffix. The guest's database is the only record of which identities
   exist; the host never mirrors the list, it asks the guest. Whether an
@@ -1326,8 +1339,11 @@ The tools of the MCP servers the person declares (`mcp_servers`, section 7)
 are not rows of the table: which they are is each server's to say, at run time.
 `nanobot/dots/mcp_servers.py` keeps one nanobot `MCPProvider` per declared
 server, on a registry of its own, as the browser has one per identity, so
-spawning, `initialize`, `tools/list`, the per-call timeout (`timeout_s`) and
-the reconnect are the client's. What is the Dot's:
+spawning, `initialize`, `tools/list` and the per-call timeout (`timeout_s`)
+are the client's. The client never reconnects a server and never repeats a
+call: a server whose process exited or whose connection dropped is reported
+(`on_terminated`), and the call that found out fails with its error, since the
+server may have run it already. What is the Dot's:
 
 - where it runs. A `command` is started through `dot-agentd relay`, as the
   user `dot`, in its home, like every program of the model: it reads and writes
@@ -1512,10 +1528,11 @@ are cut with a marker.
   then the steps). Built-in ones ship with the engine, beside its package
   (`invisible_engine_dots/skills/`, on the runtime disk at
   `/opt/invisible-dots/engine/skills/`); the first, `invisible-playwright`, says how
-  to use the browser: identities, how a page is found (a link seen in a
-  snapshot or a search on Brave, never an address from memory), the order a
-  page cannot tell from a person (a selector, then coordinates, then a
-  screenshot), and when to say a task is impossible. The Dot writes its own under `/home/dot/skills/<name>/SKILL.md` with
+  to use the browser identities: which one to use, opening and closing one,
+  and when a plain download is simpler than a browser; how to drive a page
+  (finding a page, the order a page cannot tell from a person, when to say a
+  task is impossible) is the browser server's instructions, which the system
+  prompt carries (section 8.3). The Dot writes its own under `/home/dot/skills/<name>/SKILL.md` with
   the file tools as it learns, and one of its own replaces a built-in one of the
   same name. The system prompt names every skill with its description and the path
   of its file, read again each turn (`nanobot/dots/skills.py`), and says to read the
@@ -1580,9 +1597,12 @@ The engine (`invisible_engine_dots/`) carries the contract of sections 5.3 and
 answers and any other argument is refused. The process reads its environment
 once, in `main.py`: `INVISIBLE_DOTS_AGENT_SOCKET`,
 `INVISIBLE_DOTS_AGENTD_SOCKET`, `INVISIBLE_DOTS_AGENTD_BIN`,
-`INVISIBLE_DOTS_WORKSPACE`, `INVISIBLE_DOTS_ENGINE_STATE`, and for tests and
-the smoke `INVISIBLE_DOTS_OPENROUTER_URL`. Before it serves it checks that no
-other engine owns the state.
+`INVISIBLE_DOTS_WORKSPACE`, `INVISIBLE_DOTS_ENGINE_STATE`,
+`INVISIBLE_DOTS_NETWORK_CHECK` (the host the network check reaches),
+`INVISIBLE_DOTS_MCP_COMMAND` (the browser server's command),
+`INVISIBLE_DOTS_MODEL_USER` (the user of the model's commands, whom the API
+socket refuses), and for tests and the smoke `INVISIBLE_DOTS_OPENROUTER_URL`.
+Before it serves it checks that no other engine owns the state.
 
 - Work. One class, `TurnRunner` (`turns.py`), starts every model turn and
   drives nanobot's `AgentRunner` (`nanobot/agent/runner.py`); the `Engine`
@@ -1674,8 +1694,8 @@ other engine owns the state.
 - The config. `PUT /config` is validated (`DotRuntimeConfig`, the same checks as
   the zod schema), stored in `dots_kv` and projected in process
   (`projection.py`): the OpenRouter model id, the tools offered (those of the
-  table whose permission is `allow` or `ask`, minus the memory tools when
-  memory is off), `max_steps_per_task` as the step limit, the 12000-character
+  table whose permission is `allow` or `ask`), `max_steps_per_task` as the
+  step limit, the 12000-character
   result cap, and the Dot's section of
   the system prompt (its name and instructions, then nanobot's tool
   contract, a short note on its computer, the memory notes, MEMORY.md, where the past conversations are,
@@ -1703,8 +1723,8 @@ other engine owns the state.
   `_admit_tool_call` in `nanobot/agent/tools/execution.py`, after the call was
   validated and its arguments cast and before anything runs; the gate is a
   required argument of the runner (`AgentRunSpec.gate`), the contract it
-  answers is in `nanobot/agent/tools/gate_types.py`, and a batch of calls that
-  run together is decided in full before any of them starts, so a park stops
+  answers is in `nanobot/agent/tools/gate_types.py`, and the calls of a
+  response run one at a time, each decided before it runs, so a park stops
   the calls after it; `ToolRegistry` has no way to run a tool, so no call
   reaches one another way. The decision
   is made from the map the host pushed (section 7), read at the moment of the
@@ -1762,7 +1782,9 @@ other engine owns the state.
   `browser_identity_launch` opens it again as the same person, on a blank page
   (the model cannot call `browser_open`; the launch is its way, and the one
   decision of whether a browser starts). A frame that finds the browser gone
-  closes the identity the same way. "Gone" is the library's own sentence as the
+  closes the identity the same way. "Gone" is the library's own sentence (its
+  `NOT_OPEN` and `GONE`, which `capture-mcp-interface.py` records from the pinned
+  package's constants in `nanobot/dots/invisible_playwright_mcp.json`) as the
   whole error of the call, not a phrase inside one: a failed click or select
   echoes text the page controls, and a page that writes the sentence closes nothing. The manager hears of the end
   when it happens, from the client's transport, so a process that dies while idle
@@ -1848,9 +1870,11 @@ other engine owns the state.
   `invisible_engine_dots/UPSTREAM.md`): the app shells, the channels, the bus
   and the commands, the agent loop and its hooks, the other approval and guard
   mechanisms (the workspace path policy, the command guard, the sandbox, the
-  SSRF guard), subagents, skills, the web tools, image and document reading,
-  the usage telemetry, the configuration files and every provider but
-  OpenRouter.
+  SSRF guard), subagents, nanobot's skill machinery (the Dot's skills are its
+  own, section 8.6), the web tools, image and document reading, the usage
+  telemetry, the configuration files, every provider but OpenRouter, and the
+  options nothing of the Dot sets (reasoning effort, concurrent tool batches,
+  the spill of a long result to a file, the event sink, the MCP reconnect).
 
 ## 9. Control plane
 
@@ -1895,7 +1919,8 @@ published after COMMIT: the Dot or its computer changing state (`dot.created`
 with its rows, `computer.state` and `computer.started` with the process and the
 images, `computer.stopped` with the stopped state and the Dot's status,
 `dot.deleted` with the deletion, `dot.updated` with the saved config, ERROR with
-`dot.updated`), a task (`task.created`), an answer (`approval.resolved`, and
+`dot.updated`), a task (`task.created`, `task.cancelled`, and the `task.failed` of a task
+whose delivery the host gives up), an answer (`approval.resolved`, and
 the `dot.updated` of "always allow"), and what a channel reports or the person
 does to it (`channel.status`, `channel.changed`, `channel.peer.paired`). A
 control plane killed between two writes therefore leaves the state it was in
@@ -1963,15 +1988,17 @@ event never overtakes an earlier one:
   reached the guest: it is sent again with the same id, which the guest
   ignores if it has it, and it never counts as a failure. Only failures
   with a known outcome count: the guest refused the event (it is dropped),
-  or nothing listened. After 3 such failures a `task.created` gives its task
-  up as FAILED; a message or a decision is never given up and waits for the
-  next READY.
+  or nothing listened. After 3 such failures, or one refusal, a `task.created`
+  gives its task up as FAILED, logged as `task.failed` in the same transaction
+  (a task cancelled meanwhile stays cancelled); a message or a decision is never
+  given up and waits for the next READY.
 
 ### 9.3 Lifecycles
 
-VM states: `PROVISIONING, STARTING, RUNNING, IDLE, STOPPING, STOPPED, ERROR, DELETING`.
+VM states: `PROVISIONING, STARTING, RUNNING, STOPPING, STOPPED, ERROR, DELETING`.
 
-Dot states: `CREATING, READY, IDLE, RUNNING, WAITING_APPROVAL, ERROR, DISABLED`.
+Dot states: `CREATING, READY, IDLE, RUNNING, WAITING_APPROVAL, ERROR`. A Dot whose
+computer sleeps is IDLE and its computer STOPPED: there is no idle state of a VM.
 
 Task states: `PENDING, RUNNING, WAITING_APPROVAL, COMPLETED, FAILED, CANCELLED`.
 
@@ -2022,7 +2049,7 @@ Dot sleeps, so the host starts the computer for them. The guest reports, with
 `automation.next_run` (section 5.4), when its earliest enabled automation is due,
 and the host keeps it in `computers.next_automation_at`. The scheduler's pass
 (every `dispatchIntervalMs`, 5 s) starts every STOPPED computer that the person did not stop (below) and whose Dot is not
-in ERROR, DISABLED or CREATING and whose next automation is due within the
+in ERROR or CREATING and whose next automation is due within the
 wake lead time (`lifecycle.automationWakeLeadMs`, 90 s by default: a start
 reaches READY with some to spare) or is already past, a run missed while the
 host or the computer was down, which the guest makes as it starts. The same
@@ -2086,6 +2113,7 @@ POST   /api/dots/:id/messages        body: { text }
 GET    /api/dots/:id/messages        ?limit=&order=asc|desc&before=<event id>   conversation, from the event log (a user message carries `origin` when it came through a channel); oldest first by default, at most 500 a page; `order=desc` is the newest first and `before` (the `event_id` of the oldest message of the previous page, desc only) goes on, older, from there
 POST   /api/dots/:id/tasks           body: { description, priority?, scheduled_at? }
 GET    /api/dots/:id/tasks           ?limit=&before=<task id>   the newest created first, at most 200 a page; `before` (the id of the last task of the previous page) goes on, older
+GET    /api/tasks                    ?status=COMPLETED|FAILED|CANCELLED&finished_after=<ISO time>   { tasks }: the tasks of every Dot that ended in that state after that time, the latest end first, at most 200
 GET    /api/tasks/:id
 POST   /api/tasks/:id/cancel
 
@@ -2103,6 +2131,7 @@ GET    /api/dots/:id/browser-identities/:identityId/frame     image/jpeg, only w
 POST   /api/dots/:id/browser-identities/:identityId/close     204; the browser ends, the profile stays
 
 GET    /api/dots/:id/channels        { channels: [{ kind, enabled, status, status_detail, account, settings, peers, created_at }], available: [kind] }; never a token; `available` is what this server runs (WhatsApp only when it was started with it, section 9.8)
+GET    /api/channels                 { channels: [{ dot_id, kind, enabled, status, ... }] }: every channel of every Dot, each with its Dot's id; never a token
 PUT    /api/dots/:id/channels/telegram  body: { token }   links the Dot to the bot (201), or gives the linked bot a new token (200); the token is checked with Telegram, stored encrypted, never returned
 PATCH  /api/dots/:id/channels/:kind  body: { settings?: { approvals?, notify_tasks?, show_arguments? }, enabled? }   enabled false pauses the channel, its people and token stay
 POST   /api/dots/:id/channels/whatsapp/link   202 the channel's record, waiting: starts linking WhatsApp (400 when the server does not run it, 409 `already_linked`)
@@ -2243,10 +2272,10 @@ The pages are React with Tailwind CSS 4. `src/app/tokens.css` is the one place
 that holds a color, a radius or a typeface (a light and a dark set, each pair
 checked for WCAG AA contrast by a test), `globals.css` maps it into Tailwind,
 and the primitives in `src/components/ui/` are shadcn/ui source, copied in
-(`THIRD_PARTY_NOTICES.md`). Every signed-in page sits in one frame: the rail
+(`THIRD_PARTY_NOTICES.md`). Every page sits in one frame: the rail
 (the Dots with a ring around each avatar that says what it is doing, the Inbox
-with what needs the person, the state of the API and of the live stream, the theme,
-sign out) and, for a Dot, its header and tab bar. One live stream serves all of
+with what needs the person, the state of the API and of the live stream, the theme)
+and, for a Dot, its header and tab bar. One live stream serves all of
 it; `lib/attention.ts` is the single owner of what needs the person, and the
 rail badges, the avatar ring, the tab title and the favicon all read it. There
 is no other stylesheet: every screen is utilities over the tokens. The browser tests (`apps/web/e2e`, Playwright) start the
@@ -2254,8 +2283,9 @@ real control plane in-process over the fake VM layer and the built web client
 against it (`e2e/harness.ts`), so a test drives what a Dot's computer does.
 
 Home (`/`) is a card per Dot: its avatar ring and name, the state with the
-recorded reason beside an ERROR, the model, what it spent today, the approvals
-that wait, Open chat and the computer's power menu. Each card's spend pill is
+recorded reason beside an ERROR, the model, what it spent today, its last
+activity (the newest chat, task, tool, approval or browser event, one
+`order=desc&limit=1` read and then the stream), the approvals that wait, Open chat and the computer's power menu. Each card's spend pill is
 scoped to its own Dot, so a message of one Dot re-reads only that Dot's usage.
 Search appears above six Dots, and with no Dot the page invites the first, and,
 while this computer is not ready for a Dot, shows the setup checklist under the
@@ -2265,20 +2295,18 @@ an elevated terminal and an image build takes long, so they stay commands the
 person runs), and the key field when no key is stored. The checks run again
 when the person returns to the window while something is missing, and the
 checklist stays, turned green, once the last thing is done. A ready host shows
-none of it. The card has no "last activity": no route returns the newest event
-yet.
+none of it.
 
 Settings (`/settings`, in the rail) are the host's, not a Dot's: the same checks
 (`useHostChecks` is the one list the checklist, this page and the create form's
 preflight draw), the OpenRouter key (a write-only field over
 `PUT /api/secrets/openrouter`; whether one is stored comes from the health
 answer, which the shell shares and asks again after a save, so the rail agrees
-at once; the answer says how many running Dots got it), the theme, Sign out
-(`DELETE /session`) and About: the version, the database kind, the data
+at once; the answer says how many running Dots got it), the theme and About:
+the version, the database kind, the data
 directory and the logs directory, which `GET /api/health` reports for the
 purpose (`database_kind`, `data_dir`, `logs_dir`), and `invisible-dots logs
-<dot>` for a Dot's own logs. The login page is a card with the token field
-focused; it is outside the shell and asks the API nothing.
+<dot>` for a Dot's own logs.
 
 Create a Dot (`/new`) is a form in three steps (Identity, Brain, Computer and
 safety) with sliders inside `CONFIG_BOUNDS`, the idle timeout, the Careful,
@@ -2333,8 +2361,8 @@ list with its state, its result as markdown or the reason it failed, and its
 story. The task route knows a task by its id alone, so a task of another Dot
 opened under this Dot's address is shown as missing. The story and the progress lines come from the Dot's event log, which
 the page reads from its start, asking only for the event types of a task's
-story (`lib/event-log.ts` is the one function that pages through the route's
-`types` filter) only once a task is running
+story (`readEventLog` of the SDK, `packages/sdk/src/event-log.ts`, is the one
+function that pages through the route's `types` filter) only once a task is running
 or open, and then keeps current from the live stream. The newest progress line of a running task is also under the name in
 the Dot header. A task that waits for an answer shows its approval as a card on its own card and in its
 drawer, answerable there (see the Inbox below).
@@ -2345,11 +2373,14 @@ the `origin` of the message), the Dot's as markdown (no raw HTML, links open in 
 referrer, an image is shown as a link to it, a fenced block has a copy button).
 Between them it shows what the Dot did to answer, read from the same event
 log: each `tool.called` that names no task as one quiet line (the words of
-`lib/events/tool-labels.ts`, which a test keeps equal to the engine's tool
-table, then the call's `target`, and how it ended when that was not well; more
+`TOOL_LABELS` in `packages/shared/src/labels.ts`, which a test keeps equal
+to the engine's tool table, then the call's `target`, and how it ended when that was not well; more
 than three in a row fold into one line that opens), and each `approval.requested` that names no task, where it
 was asked, as the approval card while it waits (answerable there) and as a receipt
-line once answered ("Allowed for good" when the answer was "always"). The messages route and the log are two
+line once answered ("Allowed for good" when the answer was "always", with the
+person's note). A call and an approval are read into a step one way for the
+chat, a task's story and the Activity page, with one set of words for how a
+call ended and one format for how long it took (`lib/steps.ts`). The messages route and the log are two
 views of one log, so a step is placed between two messages by event id
 (`lib/chat-thread.ts`). A message shows as soon as it is sent and is replaced by
 the logged one, which `POST .../messages` names by its `event_id`; one that was
@@ -2371,13 +2402,13 @@ name>` and `?permission=<name>` (the old `/approvals` and `/dots/<id>/approvals`
 redirect to it). "Needs you" lists the waiting approvals, the one that has waited
 longest first, then the Dots in ERROR and the tasks that failed in the last 24
 hours (each dismissable; the dismissals are kept in this browser only, so a
-cleared browser shows them again). No route lists failed tasks of every Dot, so
-the shell reads each Dot's task list (the newest 200, where a recent failure is)
-and keeps the failed ones, and says when some Dot's list could not be read.
+cleared browser shows them again). The shell reads them for every Dot at once
+(`GET /api/tasks?status=FAILED&finished_after=`, a day back) and again on
+`task.failed`, and says when they could not be read.
 `lib/attention.ts` counts the three, and the rail's Inbox badge, the tab title and
 the favicon all read that one count. The approval card (S7) says what the Dot
-wants to do from the engine's tool table (`lib/events/tool-labels.ts`), the
-permission and its risk (`PERMISSION_INFO`), the Dot's reason, and the call's
+wants to do from the engine's tool table (`TOOL_LABELS`), the
+permission and its risk (`PERMISSION_INFO`, `permissionPhrase`), the Dot's reason, and the call's
 arguments in the form that reads best: a command, a diff for `write_file`,
 `edit_file` and `apply_patch`, an address, a schedule, with the raw arguments
 under Details (a proxy's password is never shown). It is destructive for a
@@ -2388,10 +2419,12 @@ it covers (`GET /api/dots/<id>/tools`, when the computer answers), and then
 `POST /api/approvals/<id>/approve` with `always: true`, which changes the Dot's
 config (section 9.6). The host answers 409 `already_resolved` to the second
 answer; the card says the approval was answered somewhere else. An answered card
-stays in place as a receipt until the person leaves the page. Keys: `j` and `k`
-move between the cards, `a` allows the selected one once and `d` denies it; a
-destructive card is not allowed by a key, `a` moves the focus to its Allow once
-button, whose press is the confirmation. History lists every approval that is no
+stays in place as a receipt until the person leaves the page. Keys, while the
+focus is in the list of the cards (WCAG 2.1.4: a single key is never the whole
+page's): `j` and `k` move between the cards, `a` allows the selected one once and
+`d` denies it, and a card the focus enters is the one selected; a destructive
+card is not allowed by a key, `a` moves the focus to its Allow once button,
+whose press is the confirmation. History lists every approval that is no
 longer waiting, the last answered first: it asks `GET /api/approvals` for the
 answered statuses with `order=desc` and `limit=50`, and "Show older answers" asks
 for the next page with `before` the last id it holds, so the newest answer is
@@ -2400,8 +2433,8 @@ newest page again and keeps the older rows it reaches (when more was answered in
 between than a page holds, the older rows are dropped and read again on request).
 A channel that needs the person (its login was refused: a revoked Telegram token, a WhatsApp device removed on the phone; one the person paused does not count) is a
 card under "Channels to link again" with what the host says and a link to the Channels page, counts in the Inbox's number, the title and the favicon, and marks
-the Dot in the rail and its Channels tab. The shell reads each Dot's `GET /api/dots/:id/channels` for it and again on `channel.status` and `channel.changed` (the host announces a pause, a resume and a removal, which no status says, so the marks follow them without a reload); a Dot whose channels
-cannot be read is counted and said, not hidden.
+the Dot in the rail and its Channels tab. The shell reads every Dot's channels at once (`GET /api/channels`) and again on `channel.status` and `channel.changed` (the host announces a pause, a resume and a removal, which no status says, so the marks follow them without a reload); channels
+that cannot be read are said, not hidden.
 
 The Computer page (`/dots/<id>/computer`) has three views, named in the address
 (`?view=screen|files|usage`, Screen when it says nothing, and so for an address of the
@@ -2523,8 +2556,10 @@ and never given credentials; the others with `add`. The hub owns every policy:
   that fails is retried with backoff (a channel's `retry_after` is honoured); one
   the channel refuses for good (the person blocked the bot) is dropped.
 - **Approvals.** When the Dot asks (`approval.requested`) and the binding's
-  `approvals` setting is on, every owner's chat gets a prompt: the tool, its
-  permission, the reason and the arguments, each cut to 300 characters (the
+  `approvals` setting is on, every owner's chat gets a prompt: what the Dot wants
+  to do and the permission with its risk, in the words the web client's approval
+  card uses (`packages/shared/src/labels.ts`), the reason and the
+  arguments, each cut to 300 characters (the
   arguments can hold private data, and a chat is read by a third party; with
   `show_arguments` off the prompt leaves them out), with an
   Approve and a Reject button. Only a paired owner, in their private chat, can
@@ -2918,7 +2953,7 @@ system and the apt packages the golden image installs on it (`apt_packages` of
 `guest/image-builder/pins.json`: Xvfb, XFCE and their libraries, over the Linux kernel,
 bash and the rest of Ubuntu's base), most of it GPL or LGPL software under its own
 licenses and source offers, downloaded from Ubuntu's archive on the machine that builds
-the image and published by no one here. Whoever copies a golden image to another
+the image, which is CI when the image is the published release of the paragraph above. Whoever copies a golden image to another
 machine takes those licenses with it (the paragraph above).
 
 ### 11.4 setup --all
@@ -2956,9 +2991,9 @@ command is also how a run that stopped is continued. In order:
 
 A step that fails ends the run with exit code 1 and the reason, and nothing
 after it is run; the message ends with the command to run again. At the end it
-prints how to start the server, the address of the web client
-(`INVISIBLE_DOTS_WEB_LISTEN` or its default) and the file whose first line is
-the token to sign in with (created when the server first starts). It does not
+prints how to start the server and the address of the web client
+(`INVISIBLE_DOTS_WEB_LISTEN` or its default), which has no login: the web
+server adds the API token itself (section 9.7). It does not
 start the server itself: `server` runs in the foreground until Ctrl+C. Ctrl+C
 asks `image build` to stop (it kills its builder VM) and ends the run between
 steps; a second Ctrl+C exits at once.

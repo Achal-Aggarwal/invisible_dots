@@ -6,7 +6,6 @@
 import type { InvisibleDotsClient } from "@invisible-dots/sdk";
 import { APPROVAL_PROMPT_TEXT_MAX, type ChannelKind, type ChannelPeerRecord, type ChannelRecord, type ChannelSettings, type ChannelStatus, type MessageOrigin } from "@invisible-dots/shared/browser";
 import type { Tone } from "./tone";
-import type { Dot } from "./types";
 
 /** How a channel is named to the person. A `Record` over the contract's kinds, so a kind added there is a compile error here until it has a name. */
 export const CHANNEL_LABELS: Record<ChannelKind, string> = {
@@ -34,13 +33,6 @@ const STATUS_VIEW: Record<ChannelStatus, ChannelState> = {
 /** The chip of a channel: its connection, or "Paused" while the person has switched it off (what it was connected to is not news then). */
 export function channelState(record: Pick<ChannelRecord, "enabled" | "status">): ChannelState {
   return record.enabled ? STATUS_VIEW[record.status] : { label: "Paused", tone: "neutral" };
-}
-
-/** The account of a channel as a person writes it: a bot's `@name`, a phone number with its plus; null until the channel reports one. */
-export function accountLabel(kind: ChannelKind, account: string | null): string | null {
-  if (account === null || account === "") return null;
-  if (kind === "telegram") return `@${account}`;
-  return account.startsWith("+") ? account : `+${account}`;
 }
 
 /** Where a channel's account can be opened in a browser: a Telegram bot's page; WhatsApp has no page for a number. */
@@ -136,21 +128,7 @@ export function needsRelinking(record: Pick<ChannelRecord, "enabled" | "status">
   return record.enabled && record.status === "needs_relink";
 }
 
-export interface RelinkRead {
-  /** The channels that need linking again, Dots in the order given, a Dot's channels in the order the host lists them. */
-  relinks: ChannelRelink[];
-  /** Dots whose channels could not be read. */
-  unread: number;
-}
-
-/**
- * The channels of every Dot that need the person. The host has no route for "every Dot's channels", so each Dot's list
- * is read; a Dot whose list cannot be read is counted, not hidden.
- */
-export async function loadRelinks(client: Pick<InvisibleDotsClient, "channels">, dots: readonly Pick<Dot, "id">[]): Promise<RelinkRead> {
-  const answers = await Promise.allSettled(dots.map((dot) => client.channels(dot.id)));
-  const relinks = answers.flatMap((answer, index) =>
-    answer.status === "fulfilled" ? answer.value.filter(needsRelinking).map((record): ChannelRelink => ({ dot_id: dots[index]!.id, kind: record.kind, detail: record.status_detail })) : [],
-  );
-  return { relinks, unread: answers.filter((answer) => answer.status === "rejected").length };
+/** The channels of every Dot that need the person, in the order the host lists them: one read of every Dot's (`GET /api/channels`). */
+export async function loadRelinks(client: Pick<InvisibleDotsClient, "everyChannel">): Promise<ChannelRelink[]> {
+  return (await client.everyChannel()).filter(needsRelinking).map((record): ChannelRelink => ({ dot_id: record.dot_id, kind: record.kind, detail: record.status_detail }));
 }

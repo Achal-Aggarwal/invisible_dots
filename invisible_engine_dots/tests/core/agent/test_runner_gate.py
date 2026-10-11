@@ -47,9 +47,8 @@ class RecordingGate:
 class CountTool(Tool):
     """A tool whose count parameter is cast from text, so the gate can be seen to get the cast value."""
 
-    def __init__(self, log: list[str], *, name: str = "count", safe: bool = False) -> None:
+    def __init__(self, log: list[str], *, name: str = "count") -> None:
         self._name = name
-        self._safe = safe
         self.log = log
         self.executed: list[dict[str, Any]] = []
 
@@ -60,10 +59,6 @@ class CountTool(Tool):
     @property
     def description(self) -> str:
         return "counts"
-
-    @property
-    def concurrency_safe(self) -> bool:
-        return self._safe
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -105,14 +100,12 @@ async def execute(
     calls: list[ToolCallRequest],
     gate: ToolGate,
     *,
-    concurrent: bool = False,
     hook: AgentHook | None = None,
     on_result: Any = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
     return await execute_tool_calls(
         tools,
         calls,
-        concurrent=concurrent,
         hook=hook or AgentHook(),
         context=AgentHookContext(iteration=0, messages=[], session_key="s1"),
         gate=gate,
@@ -207,83 +200,20 @@ class TestTheGateAtTheBoundary:
 
         assert log == ["run:1", "result:a", "run:2", "result:b"]
 
-    async def test_a_concurrent_batch_reports_in_order_after_the_batch_and_a_park_skips_the_next_batches(self) -> None:
+    async def test_a_denied_call_does_not_stop_the_calls_after_it(self) -> None:
         log: list[str] = []
-        safe_a = CountTool(log, name="safe_a", safe=True)
-        safe_b = CountTool(log, name="safe_b", safe=True)
-        unsafe = CountTool(log, name="unsafe")
-        gate = RecordingGate({"c3": park("appr_3")}, log)
-
-        async def on_result(tool_call: ToolCallRequest, result: Any, event: dict[str, str]) -> None:
-            log.append(f"result:{tool_call.id}")
-
-        results, events = await execute(
-            registry_of(safe_a, safe_b, unsafe),
-            [
-                request("c1", "safe_a", count=1),
-                request("c2", "safe_b", count=2),
-                request("c3", "unsafe", count=3),
-                request("c4", "safe_a", count=4),
-            ],
-            gate,
-            concurrent=True,
-            on_result=on_result,
-        )
-
-        assert [e["status"] for e in events] == ["ok", "ok", STATUS_PARKED, STATUS_SKIPPED]
-        assert [entry for entry in log if entry.startswith("result:")] == ["result:c1", "result:c2", "result:c3", "result:c4"]
-        # Both calls of the concurrent batch were decided and ran before anything was reported.
-        assert log.index("result:c1") > log.index("run:2")
-        # And both were decided before either ran.
-        assert log.index("decide:c2") < log.index("run:1")
-        assert unsafe.executed == [] and safe_a.executed == [{"count": 1}]
-        assert gate.skipped == ["c4"]
-
-    async def test_a_park_in_the_middle_of_a_concurrent_batch_stops_the_calls_after_it(self) -> None:
-        log: list[str] = []
-        safe_a = CountTool(log, name="safe_a", safe=True)
-        safe_b = CountTool(log, name="safe_b", safe=True)
-        safe_c = CountTool(log, name="safe_c", safe=True)
-        unsafe = CountTool(log, name="unsafe")
-        gate = RecordingGate({"c2": park("appr_2")}, log)
-
-        results, events = await execute(
-            registry_of(safe_a, safe_b, safe_c, unsafe),
-            [
-                request("c1", "safe_a", count=1),
-                request("c2", "safe_b", count=2),
-                request("c3", "safe_c", count=3),
-                request("c4", "unsafe", count=4),
-            ],
-            gate,
-            concurrent=True,
-            hook=RecordingHook(log),
-        )
-
-        assert [e["status"] for e in events] == ["ok", STATUS_PARKED, STATUS_SKIPPED, STATUS_SKIPPED]
-        assert results == ["counted 1", park_message("appr_2"), SKIPPED_MESSAGE, SKIPPED_MESSAGE]
-        # The call before the park was allowed and runs; the ones after it are neither decided nor run.
-        assert safe_a.executed == [{"count": 1}]
-        assert safe_b.executed == [] and safe_c.executed == [] and unsafe.executed == []
-        assert [c.tool_call_id for c in gate.calls] == ["c1", "c2"]
-        assert gate.skipped == ["c3", "c4"]
-        assert log == ["decide:c1", "decide:c2", "before:c1", "run:1", "after:c1"]
-
-    async def test_a_denied_call_in_a_concurrent_batch_does_not_stop_the_others(self) -> None:
-        log: list[str] = []
-        safe_a = CountTool(log, name="safe_a", safe=True)
-        safe_b = CountTool(log, name="safe_b", safe=True)
+        first = CountTool(log, name="first")
+        second = CountTool(log, name="second")
         gate = RecordingGate({"c1": Deny("files.write", "denied")}, log)
 
         results, events = await execute(
-            registry_of(safe_a, safe_b),
-            [request("c1", "safe_a", count=1), request("c2", "safe_b", count=2)],
+            registry_of(first, second),
+            [request("c1", "first", count=1), request("c2", "second", count=2)],
             gate,
-            concurrent=True,
         )
 
         assert [e["status"] for e in events] == ["error", "ok"]
-        assert safe_a.executed == [] and safe_b.executed == [{"count": 2}]
+        assert first.executed == [] and second.executed == [{"count": 2}]
         assert gate.skipped == []
         assert results[1] == "counted 2"
 
@@ -292,7 +222,6 @@ class TestTheGateAtTheBoundary:
             await execute_tool_calls(  # type: ignore[call-arg]
                 registry_of(CountTool([])),
                 [request("c1")],
-                concurrent=False,
                 hook=AgentHook(),
                 context=AgentHookContext(iteration=0, messages=[], session_key="s1"),
             )

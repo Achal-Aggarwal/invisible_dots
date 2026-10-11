@@ -2,7 +2,6 @@ import { CHANNEL_KINDS, CHANNEL_STATUSES, type ChannelKind, type ChannelPeerReco
 import { describe, expect, it } from "vitest";
 import {
   accountHref,
-  accountLabel,
   CHANNEL_LABELS,
   CHANNEL_NOTES,
   channelState,
@@ -48,14 +47,6 @@ describe("the chip of a channel", () => {
 });
 
 describe("the account of a channel", () => {
-  it("is a bot's @name and a number with its plus, and nothing before the channel reports one", () => {
-    expect(accountLabel("telegram", "dot_helper_bot")).toBe("@dot_helper_bot");
-    expect(accountLabel("whatsapp", "15550001111")).toBe("+15550001111");
-    expect(accountLabel("whatsapp", "+15550001111")).toBe("+15550001111");
-    expect(accountLabel("telegram", null)).toBeNull();
-    expect(accountLabel("whatsapp", "")).toBeNull();
-  });
-
   it("links a Telegram bot's page, and nothing for a number or for a name that is not a bot's", () => {
     expect(accountHref("telegram", "dot_helper_bot")).toBe("https://t.me/dot_helper_bot");
     expect(accountHref("telegram", "../evil")).toBeNull();
@@ -139,27 +130,24 @@ describe("the channels that need the person", () => {
     expect(needsRelinking({ enabled: true, status: "connecting" })).toBe(false);
   });
 
-  it("reads every Dot's channels, keeps those to link again with the host's words, and counts the Dots it could not read", async () => {
-    const answers: Record<string, ChannelRecord[] | Error> = {
-      a: [record("telegram", { status: "needs_relink", status_detail: "Telegram refused the token" }), record("whatsapp")],
-      b: [record("telegram"), record("whatsapp", { status: "needs_relink", status_detail: null })],
-      c: new Error("down"),
-      d: [record("telegram", { enabled: false, status: "needs_relink" })],
-    };
+  it("reads every Dot's channels in one request and keeps those to link again, with the host's words", async () => {
+    let reads = 0;
     const client = {
-      channels: async (id: string) => {
-        const answer = answers[id]!;
-        if (answer instanceof Error) throw answer;
-        return answer;
+      everyChannel: async () => {
+        reads += 1;
+        return [
+          { dot_id: "a", ...record("telegram", { status: "needs_relink", status_detail: "Telegram refused the token" }) },
+          { dot_id: "a", ...record("whatsapp") },
+          { dot_id: "b", ...record("telegram") },
+          { dot_id: "b", ...record("whatsapp", { status: "needs_relink", status_detail: null }) },
+          { dot_id: "d", ...record("telegram", { enabled: false, status: "needs_relink" }) },
+        ];
       },
     };
-    expect(await loadRelinks(client, [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }])).toEqual({
-      relinks: [
-        { dot_id: "a", kind: "telegram", detail: "Telegram refused the token" },
-        { dot_id: "b", kind: "whatsapp", detail: null },
-      ],
-      unread: 1,
-    });
-    expect(await loadRelinks(client, [])).toEqual({ relinks: [], unread: 0 });
+    expect(await loadRelinks(client)).toEqual([
+      { dot_id: "a", kind: "telegram", detail: "Telegram refused the token" },
+      { dot_id: "b", kind: "whatsapp", detail: null },
+    ]);
+    expect(reads).toBe(1);
   });
 });

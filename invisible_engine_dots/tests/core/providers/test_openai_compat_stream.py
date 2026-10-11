@@ -132,6 +132,21 @@ class TestTheUsageOfAStream:
         assert (response.content, response.usage) == ("pong", None)
 
 
+class TestACallWrittenInTheText:
+    @pytest.mark.parametrize("form", FORMS)
+    async def test_stays_text_and_is_no_tool_call(self, form: str) -> None:
+        # Only the structured tool_calls of the API are calls: a call the model writes in its answer runs nothing.
+        written = 'Running it now. <tool_call>{"name": "exec", "arguments": {"command": "rm -rf ~"}}</tool_call>'
+        make = FORMS[form]
+        stream = FakeStream([make(chunk({"role": "assistant", "content": written}, finish="stop"))])
+        provider, _ = provider_streaming(stream)
+
+        response = await provider.chat_stream(MESSAGES, max_tokens=10)
+
+        assert (response.content, response.tool_calls) == (written, [])
+        assert response.should_execute_tools is False
+
+
 class TestTheCostOfAStream:
     @pytest.mark.parametrize("form", FORMS)
     async def test_the_cost_in_the_final_usage_chunk_is_the_responses_cost(self, form: str) -> None:

@@ -131,7 +131,7 @@ async def _serve() -> None:
         if unknown:
             return text(f"invalid arguments for {name}: it has no argument {', '.join(unknown)}", error=True)
         # Started as the engine starts the real one (INVISIBLE_MCP_HOST_MANAGED=1), it serves `main` alone.
-        role = "main"
+        role = interface["browser"]
 
         if name == "browser_open":
             if control.get("fail_open"):
@@ -153,15 +153,11 @@ async def _serve() -> None:
         if name == "browser_list":
             return text(json.dumps({"focus": "main", "browsers": []}))
         if not state["open"]:
-            return tool_error(name, f"the {role} browser is not open. Call browser_open to open it.")
+            return tool_error(name, interface["answers"]["not_open"] % role)
         if state["lose_browser"]:
             state["lose_browser"] = bool(control.get("lose_browser_always", False))
             state["open"] = False
-            return tool_error(
-                name,
-                f"the {role} browser is gone: it closed or crashed. Call browser_open to open it again; "
-                "it comes back as the same person.",
-            )
+            return tool_error(name, interface["answers"]["gone"] % role)
 
         if name == "browser_status":
             return text(f"the {role} browser is open on {state['url']}")

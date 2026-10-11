@@ -36,5 +36,10 @@ if [ "$agent" = longmemeval ]; then
   python3 tests/bench/longmemeval.py "$@"
   exit
 fi
+# The tasks are generated, never stored (README): written fresh before every run, so a run always takes exactly what
+# the generators write, data files included.
+rm -rf tests/bench/tasks tests/bench/tasks-long
+python3 tests/bench/author.py tests/bench/tasks
+python3 tests/bench/author_long.py tests/bench/tasks-long
 PYTHONPATH="$repo/tests/bench${PYTHONPATH:+:$PYTHONPATH}" \
   harbor run -e dots_harbor.environment:DotEnvironment -a "$agent" -o "${BENCH_JOBS_DIR:-/work/bench-jobs}" "$@"

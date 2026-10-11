@@ -144,7 +144,7 @@ export class ComputersRepository {
   /**
    * The stopped computers whose Dot has an automation due at `by` or before (a time already past counts: the run was
    * missed and the guest makes it when it starts), so the control plane can start them. A computer the person stopped
-   * (`stop_reason` user) stays off until the person starts it again, and a Dot in ERROR, DISABLED or still being created
+   * (`stop_reason` user) stays off until the person starts it again, and a Dot in ERROR or still being created
    * is left alone, like the one whose work waits behind an unfinished task (`stoppedDotsWithBlockedWork`).
    */
   async stoppedWithAutomationBy(by: Date): Promise<string[]> {
@@ -156,7 +156,7 @@ export class ComputersRepository {
           AND c.next_automation_at IS NOT NULL
           AND c.next_automation_at <= $1
           AND c.stop_reason IS DISTINCT FROM 'user'
-          AND d.status NOT IN ('CREATING', 'DISABLED', 'ERROR')
+          AND d.status NOT IN ('CREATING', 'ERROR')
         ORDER BY c.next_automation_at, c.dot_id`,
       [by],
     );

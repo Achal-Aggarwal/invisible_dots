@@ -5,6 +5,7 @@
  * every caller and every test that stands in for the VM layer.
  */
 import type { HealthAnswer } from "./protocol.js";
+import { abortableSleep } from "./support.js";
 
 /** "agentd": dot-agentd answers. "agent": the agent behind it also reports status "ok". */
 export type HealthUntil = "agentd" | "agent";
@@ -86,17 +87,4 @@ export async function pollGuestHealth(source: HealthSource, options: PollGuestHe
     if (Date.now() + interval > deadline) throw new GuestHealthTimeoutError(source.address, timeoutMs, last, lastError);
     await abortableSleep(interval, options.signal);
   }
-}
-
-/** A sleep that ends early, without an error, when `signal` aborts. */
-export function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    function done() {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve();
-    }
-    signal?.addEventListener("abort", done, { once: true });
-  });
 }

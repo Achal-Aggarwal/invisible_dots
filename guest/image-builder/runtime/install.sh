@@ -57,43 +57,11 @@ install -d -o dotengine -g dotengine -m 0700 /home/dotengine/state
 proxy_dir=/run/dot-vmproxy
 if [ -n "$(python3 -c 'import json;print(json.load(open("/etc/invisible-dots/config.json")).get("proxy") or "")' 2>/dev/null)" ]; then
   install -d -o root -g root -m 0700 "$proxy_dir"
-  # Writes hev.yml (0600) and env (the proxy's address and the uplink, for the routes); answers 1 for a value that
-  # is not socks5://[user:password@]host:port.
-  if ! python3 - "$proxy_dir" <<'PY'
-import json, os, socket, subprocess, sys
-from urllib.parse import unquote, urlsplit
-out = sys.argv[1]
-url = urlsplit(json.load(open("/etc/invisible-dots/config.json"))["proxy"].strip())
-if url.scheme != "socks5" or not url.hostname or not url.port:
-    sys.exit(1)
-address = socket.getaddrinfo(url.hostname, url.port, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
-route = subprocess.run(["ip", "-4", "route", "show", "default"], capture_output=True, text=True).stdout.split()
-gateway, device = route[route.index("via") + 1], route[route.index("dev") + 1]
-q = lambda value: json.dumps(value)
-lines = [
-    "tunnel:", "  name: tun0", "  mtu: 8500", "  ipv4: 198.18.0.1", "  post-up-script: /run/dot-vmproxy/up.sh",
-    "socks5:", f"  address: {q(address)}", f"  port: {url.port}", "  udp: 'udp'",
-]
-if url.username:
-    lines += [f"  username: {q(unquote(url.username))}", f"  password: {q(unquote(url.password or ''))}"]
-lines += ["mapdns:", "  address: 198.18.0.2", "  port: 53", "  network: 100.64.0.0", "  netmask: 255.192.0.0", "  cache-size: 10000"]
-def write(name, text, mode):
-    fd = os.open(os.path.join(out, name), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    with os.fdopen(fd, "wb") as f:
-        f.write(text.encode())
-write("hev.yml", "\n".join(lines) + "\n", 0o600)
-write("up.sh", "#!/bin/sh\n"
-      f"ip route replace {address}/32 via {gateway} dev {device}\n"
-      "ip route replace default dev tun0 metric 1\n"
-      "resolvectl dns tun0 198.18.0.2 && resolvectl domain tun0 '~.' && resolvectl default-route tun0 yes\n"
-      f"resolvectl default-route {device} no || true\n", 0o700)
-write("allow.nft", "table inet dot_vmproxy {\n chain out {\n  type filter hook output priority 0; policy drop;\n"
-      "  oifname { \"lo\", \"tun0\" } accept\n  ct state established,related accept\n"
-      f"  ip daddr {address} tcp dport {url.port} accept\n  ip daddr {address} meta l4proto udp accept\n"
-      "  ip daddr 10.0.2.0/24 accept\n  udp dport 67 accept\n }\n}\n", 0o600)
-PY
-  then
-    log "error: the Dot's proxy is not socks5://[user:password@]host:port; nothing goes out until it is fixed"
+  # vmproxy.py (on this disk) writes the tunnel's settings, its routes and the firewall; when it cannot (the value is
+  # not socks5://[user:password@]host:port, its host does not resolve, the VM has no default route), it says why
+  # and writes nothing, and the firewall below lets nothing out.
+  if ! reason=$(python3 "$runtime/vmproxy.py" /etc/invisible-dots/config.json "$proxy_dir" 2>&1); then
+    log "error: the Dot's proxy cannot be set up: $reason; nothing goes out until it is fixed"
     printf 'table inet dot_vmproxy {\n chain out {\n  type filter hook output priority 0; policy drop;\n  oifname "lo" accept\n  ct state established,related accept\n  ip daddr 10.0.2.0/24 accept\n }\n}\n' > "$proxy_dir/allow.nft"
   fi
   sysctl -q -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1

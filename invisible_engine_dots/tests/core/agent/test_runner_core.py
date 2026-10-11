@@ -780,44 +780,6 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
     ]
 
 
-@pytest.mark.asyncio
-async def test_runner_carries_retry_notifications_in_provider_context():
-    """The runner carries a generic scope, not an event-specific callback."""
-    from nanobot.agent.runner import AgentRunner
-    from nanobot.events import EventSink, RetryWaitEvent
-
-    captured: dict = {}
-
-    async def chat_stream_with_retry(**kwargs):
-        captured.update(kwargs)
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    retry_wait_cb = AsyncMock()
-
-    runner = AgentRunner()
-    await runner.run(make_run_spec(provider,
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "hi"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        events=EventSink(retry_wait_cb),
-    ))
-
-    assert "on_retry_wait" not in captured
-    event = RetryWaitEvent("waiting")
-    await captured["provider_context"].events.emit(event)
-    retry_wait_cb.assert_awaited_once_with(event)
-
-
 # ---------------------------------------------------------------------------
 # Config passthrough tests
 # ---------------------------------------------------------------------------
@@ -880,31 +842,3 @@ async def test_runner_passes_max_tokens_to_provider():
 
     assert captured["max_tokens"] == 8192
 
-
-@pytest.mark.asyncio
-async def test_runner_passes_reasoning_effort_to_provider():
-    """reasoning_effort from AgentRunSpec should reach provider.chat_stream_with_retry."""
-    from nanobot.agent.runner import AgentRunner
-
-    captured: dict = {}
-
-    async def chat_stream_with_retry(**kwargs):
-        captured.update(kwargs)
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "hi"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        reasoning_effort="high",
-    ))
-
-    assert captured["reasoning_effort"] == "high"

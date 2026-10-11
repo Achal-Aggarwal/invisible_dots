@@ -269,10 +269,6 @@ class FindFilesTool(_SearchTool):
         )
 
     @property
-    def read_only(self) -> bool:
-        return True
-
-    @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -442,10 +438,6 @@ class GrepTool(_SearchTool):
             "Search text file content. "
             "Returns matches with five context lines by default."
         )
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     @property
     def parameters(self) -> dict[str, Any]:

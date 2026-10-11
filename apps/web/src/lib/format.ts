@@ -48,7 +48,6 @@ const TONES: Record<string, Tone> = {
   READY: "ok",
   CREATING: "info",
   WAITING_APPROVAL: "warn",
-  DISABLED: "neutral",
   // VM states
   PROVISIONING: "info",
   STARTING: "info",

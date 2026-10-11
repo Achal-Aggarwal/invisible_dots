@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -93,22 +94,53 @@ func TestProcFollowsAResizeAndForwardsSignals(t *testing.T) {
 	resize := make(chan ProcTTY, 1)
 	signals := make(chan syscall.Signal, 1)
 	resize <- ProcTTY{Cols: 50, Rows: 10}
+	// The program says "resized" once its terminal has the new size, and the signal is sent only then: it must reach
+	// a program that is running, and it ends the program, which would otherwise sleep for 30 s.
+	out := &signalWriter{want: "resized", seen: make(chan struct{})}
 	go func() {
-		time.Sleep(500 * time.Millisecond)
+		<-out.seen
 		signals <- syscall.SIGTERM
 	}()
-	code, out, _ := relay(t, sock, RelayOptions{
-		Argv:    []string{"/bin/sh", "-c", `sleep 0.3; stty size; sleep 30`},
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	code, err := RunRelay(ctx, RelayOptions{
+		Socket:  sock,
+		Argv:    []string{"/bin/sh", "-c", `while [ "$(stty size)" != "10 50" ]; do sleep 0.05; done; echo resized; sleep 30`},
 		TTY:     &ProcTTY{Cols: 80, Rows: 24},
 		Resize:  resize,
 		Signals: signals,
-	}, "")
-	if !strings.Contains(out, "10 50") {
-		t.Errorf("the resize did not reach the terminal: %q", out)
+	}, nil, out, io.Discard)
+	if err != nil {
+		t.Fatalf("the relay failed (the resize never reached the terminal?): %v; output %q", err, out.String())
 	}
 	if code != 128+int(syscall.SIGTERM) {
-		t.Errorf("code %d, want %d", code, 128+int(syscall.SIGTERM))
+		t.Errorf("code %d, want %d; output %q", code, 128+int(syscall.SIGTERM), out.String())
 	}
+}
+
+// signalWriter keeps what is written to it and closes seen once it holds want.
+type signalWriter struct {
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	want string
+	seen chan struct{}
+	once sync.Once
+}
+
+func (w *signalWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buf.Write(p)
+	if strings.Contains(w.buf.String(), w.want) {
+		w.once.Do(func() { close(w.seen) })
+	}
+	return n, err
+}
+
+func (w *signalWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }
 
 func TestProcDiesWithItsCaller(t *testing.T) {

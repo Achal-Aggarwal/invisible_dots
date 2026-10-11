@@ -21,9 +21,8 @@ describe("the state pill of a Dot", () => {
     expect(statePill("WAITING_APPROVAL", null)).toMatchObject({ label: "Waiting for you", tone: "warn" });
   });
 
-  it("lets an error, a disabled Dot and a Dot being created override the agent's last word", () => {
+  it("lets an error and a Dot being created override the agent's last word", () => {
     expect(statePill("ERROR", "THINKING")).toEqual({ label: "Error", tone: "error", working: false });
-    expect(statePill("DISABLED", "IDLE")).toMatchObject({ label: "Disabled", tone: "neutral" });
     expect(statePill("CREATING", null)).toMatchObject({ label: "Preparing the computer", working: true });
   });
 });

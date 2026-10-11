@@ -106,6 +106,26 @@ export class ApprovalsRepository {
     return rows.map(toRecord);
   }
 
+  /**
+   * Use up the newest approved, unused approval of `tool` on the Dot whose arguments are exactly `args`, in one
+   * statement: the person's consent to a call whose effect the host applies itself, consumed by that effect so it
+   * never applies it twice. Null when there is none. jsonb equality ignores the order of an object's keys, so the
+   * arguments compare as values, however the guest wrote them.
+   */
+  async useApproved(dotId: string, tool: string, args: Record<string, unknown>): Promise<ApprovalRecord | null> {
+    const { rows } = await this.q.query<ApprovalRow>(
+      `UPDATE approvals SET used_at = now()
+        WHERE id = (SELECT id FROM approvals
+                     WHERE dot_id = $1 AND tool = $2 AND status = 'approved' AND used_at IS NULL AND arguments = $3::jsonb
+                     ORDER BY resolved_at DESC, id DESC LIMIT 1
+                     FOR UPDATE)
+          AND used_at IS NULL
+        RETURNING *`,
+      [dotId, tool, JSON.stringify(args)],
+    );
+    return rows[0] ? toRecord(rows[0]) : null;
+  }
+
   /** Resolve a pending approval; null when it does not exist or was already resolved. */
   async resolve(id: string, status: "approved" | "rejected", note: string | null): Promise<ApprovalRecord | null> {
     const { rows } = await this.q.query<ApprovalRow>(

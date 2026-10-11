@@ -195,6 +195,13 @@ export interface ChannelRecord {
   created_at: string;
 }
 
+/** A channel and the Dot it belongs to, as `GET /api/channels` lists the channels of every Dot. */
+export type DotChannelRecord = ChannelRecord & { dot_id: string };
+
+export interface EveryChannelAnswer {
+  channels: DotChannelRecord[];
+}
+
 export interface ChannelsAnswer {
   channels: ChannelRecord[];
   /** The kinds of channel this server can run: WhatsApp is on only when the server was started with it (opt-in). */

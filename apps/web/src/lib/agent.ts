@@ -36,7 +36,6 @@ export function isWorking(agent: AgentState | null): agent is "THINKING" | "PLAN
  */
 export function statePill(status: string, agent: AgentState | null): StatePill {
   if (status === "ERROR") return { label: "Error", tone: "error", working: false };
-  if (status === "DISABLED") return { label: "Disabled", tone: "neutral", working: false };
   if (status === "CREATING") return { label: "Preparing the computer", tone: "info", working: true };
   if (agent === "WAITING_APPROVAL" || status === "WAITING_APPROVAL") return { label: "Waiting for you", tone: "warn", working: false };
   if (isWorking(agent)) return { label: agentStateLabel(agent), tone: "info", working: true };

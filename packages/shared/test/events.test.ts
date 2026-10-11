@@ -1,30 +1,56 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { z } from "zod";
 import {
   CHANNEL_CHANGES,
   CHANNEL_KINDS,
   CHANNEL_STATUSES,
   HOST_EVENT_TYPES,
   INBOUND_EVENT_TYPES,
+  inboundEventSchema,
   isHostEventType,
   isInboundEventType,
   isOutboundEventType,
   isStoredEventType,
   MAX_RUN_AT_MS,
   OUTBOUND_EVENT_TYPES,
+  outboundEventSchema,
   parseInboundEvent,
   parseMessageOrigin,
   parseOutboundEvent,
   STORED_EVENT_TYPES,
   TOOL_TARGET_MAX,
   USAGE_EVENT_TYPES,
+  type InboundEvent,
+  type OutboundEvent,
+  type OutboundEventDataMap,
+  type OutboundEventType,
 } from "../src/index.js";
 
 const ts = "2026-10-02T08:15:00.000Z";
 
+/** An object type written out, so a shape declared as an intersection (`{...} & SpentUsd`) compares as the one object it is. */
+type Flat<T> = { [K in keyof T]: T[K] };
+type Parsed = z.infer<typeof outboundEventSchema>;
+
+describe("the event shapes", () => {
+  // `parseInboundEvent` and `parseOutboundEvent` hand out what the schema took as the declared types: a schema and its
+  // declaration that drifted apart would be a cast that lies, so the typecheck holds them equal, event by event.
+  it("are what the schemas take: a parsed event is the type the code reads", () => {
+    expectTypeOf<z.infer<typeof inboundEventSchema>>().toEqualTypeOf<InboundEvent>();
+    expectTypeOf<Parsed["type"]>().toEqualTypeOf<OutboundEventType>();
+    expectTypeOf<{ [K in OutboundEventType]: Flat<Extract<Parsed, { type: K }>["data"]> }>().toEqualTypeOf<{
+      [K in OutboundEventType]: Flat<OutboundEventDataMap[K]>;
+    }>();
+    expectTypeOf<Omit<Parsed, "type" | "data">>().toEqualTypeOf<Omit<OutboundEvent, "type" | "data">>();
+  });
+});
+
 describe("event type lists", () => {
   it("name every type of the stored log once: the guest's, the host's and the person's message", () => {
     expect(new Set(STORED_EVENT_TYPES).size).toBe(STORED_EVENT_TYPES.length);
-    expect(STORED_EVENT_TYPES).toHaveLength(OUTBOUND_EVENT_TYPES.length + HOST_EVENT_TYPES.length + 1);
+    // One type is both sides': a task fails whoever ended it (the guest's turn, or the host that could not deliver it).
+    expect(HOST_EVENT_TYPES.filter((t) => (OUTBOUND_EVENT_TYPES as readonly string[]).includes(t))).toEqual(["task.failed"]);
+    expect(STORED_EVENT_TYPES).toHaveLength(OUTBOUND_EVENT_TYPES.length + HOST_EVENT_TYPES.length - 1 + 1);
     for (const type of ["tool.called", "task.progress", "automation.next_run", "approval.resolved", "channel.status", "user.message"]) {
       expect(isStoredEventType(type), type).toBe(true);
     }

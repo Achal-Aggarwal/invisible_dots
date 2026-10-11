@@ -8,8 +8,7 @@
  */
 import type { ChannelBindingRecord, Database } from "@invisible-dots/database";
 import { StreamOverflowError, type EventLog } from "@invisible-dots/events";
-import { parseMessageOrigin, type ChannelKind, type StoredEvent } from "@invisible-dots/shared";
-import { errorMessage, sleep, type Logger } from "@invisible-dots/scheduler";
+import { abortableSleep, type ChannelKind, errorMessage, type Logger, parseMessageOrigin, type StoredEvent } from "@invisible-dots/shared";
 import { Backoff, type BackoffOptions } from "./backoff.js";
 import { BindingSecrets } from "./binding-secrets.js";
 import { approvalOutcomeText, approvalPromptText } from "./approval-text.js";
@@ -173,7 +172,7 @@ export class BindingRunner {
       }
       this.#o.logger.warn("a channel stopped, starting it again", { binding: this.bindingId, kind: this.kind, reason: failure });
       this.report({ status: "error", detail: failure });
-      await sleep(Math.max(backoff.next(), asked), this.#signal);
+      await abortableSleep(Math.max(backoff.next(), asked), this.#signal);
     }
   }
 
@@ -192,7 +191,7 @@ export class BindingRunner {
         if (this.#signal.aborted) return;
         this.#o.logger.warn("a channel's event stream failed", { binding: this.bindingId, error: errorMessage(error) });
         // Falling behind is not a fault of the database: resume from the cursor at once.
-        if (!(error instanceof StreamOverflowError)) await sleep(backoff.next(), this.#signal);
+        if (!(error instanceof StreamOverflowError)) await abortableSleep(backoff.next(), this.#signal);
       }
     }
   }
@@ -349,7 +348,7 @@ export class BindingRunner {
     const backoff = new Backoff(this.#o.backoff);
     while (!this.#signal.aborted) {
       if (this.channel) return this.channel;
-      await sleep(backoff.next(), this.#signal);
+      await abortableSleep(backoff.next(), this.#signal);
     }
     return null;
   }
@@ -380,7 +379,7 @@ export class BindingRunner {
         }
         const wait = Math.max(backoff.next(), error instanceof ChannelSendError ? (error.options.retryAfterMs ?? 0) : 0);
         this.#o.logger.warn("a channel could not send, trying again", { binding: this.bindingId, kind: this.kind, reason, waitMs: wait });
-        await sleep(wait, this.#signal);
+        await abortableSleep(wait, this.#signal);
       }
     }
     return null;
