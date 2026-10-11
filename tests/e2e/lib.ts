@@ -100,6 +100,7 @@ export const TOOLS = {
   browser_identity_list: "browser.identity.list",
   browser_navigate: "browser.navigate",
   browser_snapshot: "browser.read",
+  add_mcp_server: "mcp.servers.add",
 } as const;
 export type ToolName = keyof typeof TOOLS;
 
@@ -126,6 +127,7 @@ export const EVENTS = [
   "browser.identity.deleted",
   "computer.stopped",
   "dot.deleted",
+  "mcp.server.added",
 ] as const;
 
 /** The doctor checks the run requires to be ok (apps/cli/src/doctor/checks.ts). */

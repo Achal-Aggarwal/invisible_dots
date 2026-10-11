@@ -418,8 +418,8 @@ check_offered() { # n, label, permissions json, expected tools (sorted JSON)
 }
 BROWSER_GRANTED='"computer.screenshot":"allow","browser.identity.list":"allow","browser.identity.create":"allow","browser.identity.delete":"ask","browser.identity.launch":"allow","browser.identity.close":"allow","browser.navigate":"allow","browser.read":"allow","browser.act":"allow"'
 check_offered 1 "every permission granted (files.write and browser.identity.delete ask)" \
-  '{"computer.exec":"allow","files.read":"allow","files.write":"ask","automations":"allow",'"$BROWSER_GRANTED"'}' \
-  '["apply_patch","browser_click","browser_click_at","browser_evaluate","browser_identity_close","browser_identity_create","browser_identity_delete","browser_identity_launch","browser_identity_list","browser_navigate","browser_press_key","browser_read_html","browser_read_text","browser_select_option","browser_snapshot","browser_take_screenshot","browser_type","browser_upload_files","computer_screenshot","cron","edit_file","exec","exec_session","find_files","grep","list_dir","list_exec_sessions","read_file","write_file"]'
+  '{"computer.exec":"allow","files.read":"allow","files.write":"ask","automations":"allow","mcp.servers.add":"ask",'"$BROWSER_GRANTED"'}' \
+  '["add_mcp_server","apply_patch","browser_click","browser_click_at","browser_evaluate","browser_identity_close","browser_identity_create","browser_identity_delete","browser_identity_launch","browser_identity_list","browser_navigate","browser_press_key","browser_read_html","browser_read_text","browser_select_option","browser_snapshot","browser_take_screenshot","browser_type","browser_upload_files","computer_screenshot","cron","edit_file","exec","exec_session","find_files","grep","list_dir","list_exec_sessions","read_file","write_file"]'
 check_offered 2 "exec denied, files.read allowed, the rest missing from the map (deny)" \
   '{"computer.exec":"deny","files.read":"allow"}' \
   '["find_files","grep","list_dir","read_file"]'
@@ -469,7 +469,7 @@ echo '{"computer.exec":"allow"}' > /tmp/perms.json
 echo '{}' > /tmp/mcp.json
 echo '{}' > /tmp/mcp-secrets.json
 check "the host pushes the allow-exec config with no server again (204 204)" "[ \"\$(push)\" = '204 204' ]"
-check "a server the config no longer declares is stopped, its tools gone" "for _ in \$(seq 1 30); do pgrep -u dot -f fake_tool_server.py >/dev/null || break; sleep 1; done; ! pgrep -u dot -f fake_tool_server.py >/dev/null && api $A/tools | jq -e '(.mcp_servers==[]) and ([.tools[]|select(.permission|startswith(\"mcp.\"))]==[])' >/dev/null"
+check "a server the config no longer declares is stopped, its tools gone" "for _ in \$(seq 1 30); do pgrep -u dot -f fake_tool_server.py >/dev/null || break; sleep 1; done; ! pgrep -u dot -f fake_tool_server.py >/dev/null && api $A/tools | jq -e '(.mcp_servers==[]) and ([.tools[]|select(.name|startswith(\"mcp_\"))]==[])' >/dev/null"
 # The host reads the Dot's files through the TCP port, which is limited to /home/dot with every symbolic link followed.
 # A link a page could make the Dot stage must not show the proxy password in /proc/<pid>/environ of the browser server
 # (it runs as dot), nor the Dot's token. The engine's socket takes any path dot can open.
