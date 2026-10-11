@@ -63,6 +63,8 @@ const FAMILY_OF: Record<KnownType, EventFamily> = {
   "agent.state": "computer",
   "automation.next_run": "computer",
   "guest.event.refused": "computer",
+  "mcp.server.added": "dot",
+  "mcp.server.refused": "dot",
   "channel.status": "channels",
   "channel.peer.paired": "channels",
   "channel.changed": "channels",
@@ -223,6 +225,12 @@ const DESCRIBE: { [K in KnownType]: (data: Partial<EventData[K]>) => Draft } = {
     tone: d.changed === false ? "neutral" : "info",
   }),
   // The engine sent something the control plane could not read, so it is not in this log: this row is all there is of it.
+  "mcp.server.added": (d) => {
+    const call = (d.arguments ?? {}) as Record<string, unknown>;
+    const runs = [text(call.command), ...(Array.isArray(call.args) ? call.args.map(text) : [])].filter(Boolean).join(" ") || text(call.url);
+    return { title: "Added an MCP server", detail: joined(text(call.name), runs && `- ${runs}`), tone: "info" };
+  },
+  "mcp.server.refused": (d) => ({ title: "An MCP server was not added", detail: joined(text(d.name), text(d.reason) && `- ${text(d.reason)}`), tone: "warn" }),
   "guest.event.refused": (d) => ({
     title: "The computer sent an event that was not read",
     detail: joined(text(d.type), typeof d.seq === "number" ? `(#${d.seq})` : "", text(d.problem) && `- ${text(d.problem)}`),

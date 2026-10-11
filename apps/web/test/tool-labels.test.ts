@@ -38,7 +38,8 @@ describe("the words for the engine's tools", () => {
 
   it("say what a call would do, in the infinitive, for the question put to the person", () => {
     for (const [tool, { ask }] of Object.entries(TOOL_LABELS)) {
-      expect(ask, tool).toMatch(/^[a-z][a-z ]+[a-z]$/);
+      // Lowercase, as it follows "wants to"; an acronym (MCP) keeps its capitals.
+      expect(ask, tool).toMatch(/^[a-z][A-Za-z ]+[a-z]$/);
       expect(ask, tool).not.toMatch(/[._]/);
     }
     expect(toolLabel("browser_identity_delete").ask).toBe("delete a browser identity");

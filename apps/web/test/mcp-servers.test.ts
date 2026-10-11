@@ -1,6 +1,7 @@
 import { parseDotConfig, resolvePermission } from "@invisible-dots/shared/browser";
 import { describe, expect, it } from "vitest";
-import { isDestructive, permissionInfo, type ApprovalAsk } from "../src/lib/approval-view";
+import { approvalBody, askTitle, isDestructive, permissionInfo, type ApprovalAsk } from "../src/lib/approval-view";
+import { viewEvent } from "../src/lib/events/view";
 import { configChanges, rebase, setMcpServer, setPermission } from "../src/lib/config-fields";
 import { EMPTY_MCP_SERVER_FORM, formOfServer, serverOfForm } from "../src/lib/mcp-server-form";
 import { presetOf, presetPermissions } from "../src/lib/permission-presets";
@@ -78,7 +79,9 @@ describe("an MCP server in the settings", () => {
     const tools = [{ name: "mcp_time_now", permission: "mcp.time" as const, offered: true, description: "Now." }];
     const group = permissionGroups(base, base, tools).find((g) => g.id === "mcp");
     expect(group?.label).toBe("MCP servers");
-    expect(group?.rows).toEqual([
+    // The permission to add a server comes first, then one row per declared server.
+    expect(group?.rows.map((row) => [row.permission, row.decision])).toEqual([["mcp.servers.add", "ask"], ["mcp.time", "ask"]]);
+    expect(group?.rows.slice(1)).toEqual([
       {
         permission: "mcp.time",
         label: "MCP server time",
@@ -98,5 +101,32 @@ describe("an MCP server in the settings", () => {
     expect(permissionInfo("mcp.time")).toMatchObject({ permission: "mcp.time", label: "MCP server time", risk: "high" });
     expect(isDestructive(ask)).toBe(true);
     expect(permissionInfo("mcp.Bad")).toBeNull();
+  });
+});
+
+describe("a server the Dot adds itself", () => {
+  const ask = (args: Record<string, unknown>) => ({ permission: "mcp.servers.add", tool: "add_mcp_server", arguments: args }) as unknown as ApprovalAsk;
+
+  it("asks with what the server runs, the secrets the person will set and why, never more", () => {
+    const body = approvalBody(ask({ name: "clock", command: "uvx", args: ["--from", "git+https://github.com/o/r", "clock-mcp"], env: { TZ: "Europe/Rome" }, secrets: ["API_KEY"], reason: "to tell the time" }));
+    expect(body).toEqual({
+      kind: "facts",
+      facts: [
+        { label: "Name", value: "clock" },
+        { label: "Runs, as the Dot's user", value: "uvx --from git+https://github.com/o/r clock-mcp" },
+        { label: "Environment", value: "TZ=Europe/Rome" },
+        { label: "Secrets you will set", value: "API_KEY" },
+        { label: "Why", value: "to tell the time" },
+      ],
+    });
+    expect(approvalBody(ask({ name: "web", url: "https://w.example/mcp", reason: "r" }))).toMatchObject({ facts: [{ label: "Name" }, { label: "URL", value: "https://w.example/mcp" }, { label: "Why" }] });
+    expect(askTitle(ask({}))).toBe("Wants to add an MCP server to its config");
+    expect(permissionInfo("mcp.servers.add")).toMatchObject({ label: "Add MCP servers", risk: "high" });
+  });
+
+  it("says in the activity what was added, and why one was not", () => {
+    const event = (type: string, data: Record<string, unknown>) => viewEvent({ id: 1, dot_id: "d", type, source: "guest", data, created_at: "2026-10-11T00:00:00Z" } as never);
+    expect(event("mcp.server.added", { arguments: { name: "clock", command: "uvx", args: ["mcp-server-time"] } })).toMatchObject({ title: "Added an MCP server", detail: "clock - uvx mcp-server-time" });
+    expect(event("mcp.server.refused", { name: "clock", reason: "the Dot's config denies mcp.servers.add" })).toMatchObject({ title: "An MCP server was not added", tone: "warn" });
   });
 });
