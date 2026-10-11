@@ -16,7 +16,7 @@ from typing import Callable
 import pytest
 
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronPayload, CronSchedule
+from nanobot.cron.types import CronSchedule
 
 
 def _seeded_store(tmp_path: Path) -> tuple[CronService, Path]:
@@ -55,15 +55,6 @@ def _assert_single_corrupt_backup(store_path: Path) -> None:
     backups = list(store_path.parent.glob("jobs.json.corrupt-*"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == "{not valid json"
-
-
-def _system_job(job_id: str = "dream") -> CronJob:
-    return CronJob(
-        id=job_id,
-        name="Dream",
-        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
-        payload=CronPayload(kind="system_event"),
-    )
 
 
 def test_save_store_is_atomic(tmp_path: Path) -> None:
@@ -108,7 +99,7 @@ def test_save_store_failure_does_not_corrupt_existing_file(
     assert store_path.read_bytes() == original
 
 
-@pytest.mark.parametrize("operation", ["add", "update", "delete"])
+@pytest.mark.parametrize("operation", ["add", "delete"])
 def test_action_log_survives_failed_store_save(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
@@ -120,8 +111,6 @@ def test_action_log_survives_failed_store_save(
             schedule=CronSchedule(kind="every", every_ms=60_000),
             message="hello",
         )
-    elif operation == "update":
-        writer.update_job(job.id, name="Updated reminder")
     else:
         assert writer.remove_job(job.id) == "removed"
     expected = [(j.id, j.name) for j in writer.list_jobs(include_disabled=True)]
@@ -289,10 +278,6 @@ def test_load_store_falls_back_to_in_memory_on_corruption_after_start(
         ("get_job", lambda service: service.get_job("missing")),
         ("status", lambda service: service.status()),
         ("remove_job", lambda service: service.remove_job("missing")),
-        ("enable_job", lambda service: service.enable_job("missing", enabled=False)),
-        ("update_job", lambda service: service.update_job("missing", name="new name")),
-        ("register_system_job", lambda service: service.register_system_job(_system_job())),
-        ("remove_system_job", lambda service: service.remove_system_job("heartbeat")),
     ],
 )
 def test_public_apis_raise_clear_error_for_unavailable_corrupt_store(
@@ -311,36 +296,6 @@ def test_public_apis_raise_clear_error_for_unavailable_corrupt_store(
     assert api_name
     assert str(store_path) in str(exc_info.value)
     _assert_single_corrupt_backup(store_path)
-
-
-@pytest.mark.asyncio
-async def test_run_job_raises_clear_error_and_restores_running_state_for_corrupt_store(
-    tmp_path: Path,
-) -> None:
-    store_path = _corrupt_store(tmp_path)
-    service = CronService(store_path)
-
-    with pytest.raises(RuntimeError, match="corrupt.*restore jobs.json"):
-        await service.run_job("missing")
-
-    assert service._running is False
-    _assert_single_corrupt_backup(store_path)
-
-
-@pytest.mark.asyncio
-async def test_run_job_preserves_running_state_when_corrupt_store_unavailable(
-    tmp_path: Path,
-) -> None:
-    store_path = _corrupt_store(tmp_path)
-    service = CronService(store_path)
-    service._running = True
-    service._arm_timer = lambda: None
-
-    with pytest.raises(RuntimeError, match="corrupt.*restore jobs.json"):
-        await service.run_job("missing")
-
-    assert service._running is True
-    service.stop()
 
 
 def test_running_add_job_raises_clear_error_for_unavailable_corrupt_store(

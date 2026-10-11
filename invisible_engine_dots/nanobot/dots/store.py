@@ -17,10 +17,11 @@ transaction atomic per file only.
   the Dot's alone has a `memory_keys_json` column too, which its default fills;
 - dots_spend: what the model requests of a session have cost, in USD, and whether one of them reported
   no cost (see `nanobot.dots.spend`);
-- dots_browser_identities: the browser identities of the Dot (id, name, proxy, created, last used,
-  archived). Whether one is open is never stored: it is derived from the live browser sessions of
-  this process, so a file never says "open" about a process that is gone. Its profile is a
-  directory of the Computer (`browsers/<id>`), not a row;
+- dots_browser_identities: the browser identities of the Dot (id, name, proxy, created, last used).
+  Whether one is open is never stored: it is derived from the live browser sessions of this
+  process, so a file never says "open" about a process that is gone. Its profile is a
+  directory of the Computer (`browsers/<id>`), not a row. A file made before identities lost their
+  archived state has an `archived` column too, which its default fills and nothing reads;
 - dots_kv: the runtime config the host pushed and the last agent state;
 - dots_approvals: a tool call the policy answered "ask", with its full
   arguments, from the request to the call that ran it or the rejection the
@@ -135,8 +136,7 @@ _SCHEMA: tuple[str, ...] = (
       name TEXT NOT NULL,
       proxy TEXT,
       created_at INTEGER NOT NULL,
-      last_used_at INTEGER,
-      archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
+      last_used_at INTEGER
     ) STRICT
     """,
     "CREATE INDEX dots_browser_identities_order ON dots_browser_identities (created_at, id)",
@@ -836,10 +836,9 @@ class BrowserIdentityRow:
     proxy: str | None
     created_at: int
     last_used_at: int | None
-    archived: bool
 
 
-_IDENTITY_COLUMNS = "id, name, proxy, created_at, last_used_at, archived"
+_IDENTITY_COLUMNS = "id, name, proxy, created_at, last_used_at"
 
 
 def _identity(row: sqlite3.Row) -> BrowserIdentityRow:
@@ -849,7 +848,6 @@ def _identity(row: sqlite3.Row) -> BrowserIdentityRow:
         row["proxy"],
         int(row["created_at"]),
         None if row["last_used_at"] is None else int(row["last_used_at"]),
-        bool(row["archived"]),
     )
 
 
@@ -861,14 +859,14 @@ def insert_identity(
     proxy: str | None = None,
     now_ms: int | None = None,
 ) -> bool:
-    """Record a new identity, never used and not archived; False when its id is known already.
+    """Record a new identity, never used; False when its id is known already.
 
     The rules a name, a proxy and an id meet are `nanobot.dots.identity_rules`'s: the caller checks
     them, this stores what it is given.
     """
     cursor = conn.execute(
         f"""
-        INSERT INTO dots_browser_identities ({_IDENTITY_COLUMNS}) VALUES (?, ?, ?, ?, NULL, 0)
+        INSERT INTO dots_browser_identities ({_IDENTITY_COLUMNS}) VALUES (?, ?, ?, ?, NULL)
         ON CONFLICT (id) DO NOTHING
         """,
         (identity_id, name, proxy, clock_ms() if now_ms is None else now_ms),
@@ -890,7 +888,7 @@ def list_identities(conn: sqlite3.Connection) -> list[BrowserIdentityRow]:
 
 
 def count_identities(conn: sqlite3.Connection) -> int:
-    """How many identities exist (archived ones too: they still hold a profile)."""
+    """How many identities exist."""
     return int(conn.execute("SELECT count(*) FROM dots_browser_identities").fetchone()[0])
 
 
@@ -900,12 +898,6 @@ def touch_identity(conn: sqlite3.Connection, identity_id: str, now_ms: int | Non
         "UPDATE dots_browser_identities SET last_used_at = ? WHERE id = ?",
         (clock_ms() if now_ms is None else now_ms, identity_id),
     )
-    return cursor.rowcount == 1
-
-
-def set_identity_archived(conn: sqlite3.Connection, identity_id: str, archived: bool) -> bool:
-    """Archive or restore an identity; False when there is no such identity."""
-    cursor = conn.execute("UPDATE dots_browser_identities SET archived = ? WHERE id = ?", (int(archived), identity_id))
     return cursor.rowcount == 1
 
 

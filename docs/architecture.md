@@ -104,14 +104,16 @@ invisible_engine_dots/
                    nanobot (HKUDS/nanobot, MIT, commit f75470e7), Python 3.11 or newer, provenance
                    and everything removed since the import in invisible_engine_dots/UPSTREAM.md.
                    Import package `nanobot`, distribution `invisible-dots-engine`. Only
-                   the engine core is kept: no channel, web UI, TUI, audio, pairing, skill,
-                   subagent, web tool or CLI (the one entry point answers `--version` and refuses
-                   every other command). What it carries: nanobot's tool-calling turn runner,
-                   chat completions to OpenRouter and no other provider, the tools of the
-                   permission table (section 8.8), nanobot's cron service and its MCP client
-                   (which serves only the Dot's browsers, `invisible-playwright-mcp`, through
-                   the `BrowserManager`). The Dot's own layer, the contract of sections 5.3
-                   to 5.4, is `nanobot/dots/`. Its own pytest suite runs in CI's `engine` job
+                   the engine core is kept: no channel, web UI, TUI, audio, pairing, nanobot
+                   skill machinery, subagent, web tool or CLI (the one entry point answers
+                   `--version` and refuses every other command). What it carries: nanobot's
+                   tool-calling turn runner, chat completions to OpenRouter and no other
+                   provider, the tools of the permission table (section 8.8), nanobot's cron
+                   service and its MCP client (which serves the Dot's browsers,
+                   `invisible-playwright-mcp`, through the `BrowserManager`, and the MCP servers
+                   the person declares, through `nanobot/dots/mcp_servers.py`). The Dot's own
+                   layer, the contract of sections 5.3 to 5.4, its skills (section 8.6,
+                   `nanobot/dots/skills.py`) included, is `nanobot/dots/`. Its own pytest suite runs in CI's `engine` job
                    (`.github/workflows/tests.yml`, Linux only: unix sockets)
 virtualization/
   qemu/            the pinned QEMU version for Windows setup (installer URL + SHA-256) and argv notes
@@ -984,7 +986,7 @@ ignores anything else.
   identity proxy's. An identity proxy is not the way to give a browser a
   location: a Dot that should appear somewhere gets that from its VM's egress.
 - An identity is a row of the engine's `dots_browser_identities` table (id,
-  name, proxy, created, last used, archived) and a directory under
+  name, proxy, created, last used) and a directory under
   `/home/dot/browsers/<identity_id>/`. Its id is a slug of its name plus a short
   random suffix. The guest's database is the only record of which identities
   exist; the host never mirrors the list, it asks the guest. Whether an
@@ -1331,8 +1333,11 @@ The tools of the MCP servers the person declares (`mcp_servers`, section 7)
 are not rows of the table: which they are is each server's to say, at run time.
 `nanobot/dots/mcp_servers.py` keeps one nanobot `MCPProvider` per declared
 server, on a registry of its own, as the browser has one per identity, so
-spawning, `initialize`, `tools/list`, the per-call timeout (`timeout_s`) and
-the reconnect are the client's. What is the Dot's:
+spawning, `initialize`, `tools/list` and the per-call timeout (`timeout_s`)
+are the client's. The client never reconnects a server and never repeats a
+call: a server whose process exited or whose connection dropped is reported
+(`on_terminated`), and the call that found out fails with its error, since the
+server may have run it already. What is the Dot's:
 
 - where it runs. A `command` is started through `dot-agentd relay`, as the
   user `dot`, in its home, like every program of the model: it reads and writes
@@ -1517,10 +1522,11 @@ are cut with a marker.
   then the steps). Built-in ones ship with the engine, beside its package
   (`invisible_engine_dots/skills/`, on the runtime disk at
   `/opt/invisible-dots/engine/skills/`); the first, `invisible-playwright`, says how
-  to use the browser: identities, how a page is found (a link seen in a
-  snapshot or a search on Brave, never an address from memory), the order a
-  page cannot tell from a person (a selector, then coordinates, then a
-  screenshot), and when to say a task is impossible. The Dot writes its own under `/home/dot/skills/<name>/SKILL.md` with
+  to use the browser identities: which one to use, opening and closing one,
+  and when a plain download is simpler than a browser; how to drive a page
+  (finding a page, the order a page cannot tell from a person, when to say a
+  task is impossible) is the browser server's instructions, which the system
+  prompt carries (section 8.3). The Dot writes its own under `/home/dot/skills/<name>/SKILL.md` with
   the file tools as it learns, and one of its own replaces a built-in one of the
   same name. The system prompt names every skill with its description and the path
   of its file, read again each turn (`nanobot/dots/skills.py`), and says to read the
@@ -1585,9 +1591,12 @@ The engine (`invisible_engine_dots/`) carries the contract of sections 5.3 and
 answers and any other argument is refused. The process reads its environment
 once, in `main.py`: `INVISIBLE_DOTS_AGENT_SOCKET`,
 `INVISIBLE_DOTS_AGENTD_SOCKET`, `INVISIBLE_DOTS_AGENTD_BIN`,
-`INVISIBLE_DOTS_WORKSPACE`, `INVISIBLE_DOTS_ENGINE_STATE`, and for tests and
-the smoke `INVISIBLE_DOTS_OPENROUTER_URL`. Before it serves it checks that no
-other engine owns the state.
+`INVISIBLE_DOTS_WORKSPACE`, `INVISIBLE_DOTS_ENGINE_STATE`,
+`INVISIBLE_DOTS_NETWORK_CHECK` (the host the network check reaches),
+`INVISIBLE_DOTS_MCP_COMMAND` (the browser server's command),
+`INVISIBLE_DOTS_MODEL_USER` (the user of the model's commands, whom the API
+socket refuses), and for tests and the smoke `INVISIBLE_DOTS_OPENROUTER_URL`.
+Before it serves it checks that no other engine owns the state.
 
 - Work. One class, `TurnRunner` (`turns.py`), starts every model turn and
   drives nanobot's `AgentRunner` (`nanobot/agent/runner.py`); the `Engine`
@@ -1679,8 +1688,8 @@ other engine owns the state.
 - The config. `PUT /config` is validated (`DotRuntimeConfig`, the same checks as
   the zod schema), stored in `dots_kv` and projected in process
   (`projection.py`): the OpenRouter model id, the tools offered (those of the
-  table whose permission is `allow` or `ask`, minus the memory tools when
-  memory is off), `max_steps_per_task` as the step limit, the 12000-character
+  table whose permission is `allow` or `ask`), `max_steps_per_task` as the
+  step limit, the 12000-character
   result cap, and the Dot's section of
   the system prompt (its name and instructions, then nanobot's tool
   contract, a short note on its computer, the memory notes, MEMORY.md, where the past conversations are,
@@ -1708,8 +1717,8 @@ other engine owns the state.
   `_admit_tool_call` in `nanobot/agent/tools/execution.py`, after the call was
   validated and its arguments cast and before anything runs; the gate is a
   required argument of the runner (`AgentRunSpec.gate`), the contract it
-  answers is in `nanobot/agent/tools/gate_types.py`, and a batch of calls that
-  run together is decided in full before any of them starts, so a park stops
+  answers is in `nanobot/agent/tools/gate_types.py`, and the calls of a
+  response run one at a time, each decided before it runs, so a park stops
   the calls after it; `ToolRegistry` has no way to run a tool, so no call
   reaches one another way. The decision
   is made from the map the host pushed (section 7), read at the moment of the
@@ -1767,7 +1776,9 @@ other engine owns the state.
   `browser_identity_launch` opens it again as the same person, on a blank page
   (the model cannot call `browser_open`; the launch is its way, and the one
   decision of whether a browser starts). A frame that finds the browser gone
-  closes the identity the same way. "Gone" is the library's own sentence as the
+  closes the identity the same way. "Gone" is the library's own sentence (its
+  `NOT_OPEN` and `GONE`, which `capture-mcp-interface.py` records from the pinned
+  package's constants in `nanobot/dots/invisible_playwright_mcp.json`) as the
   whole error of the call, not a phrase inside one: a failed click or select
   echoes text the page controls, and a page that writes the sentence closes nothing. The manager hears of the end
   when it happens, from the client's transport, so a process that dies while idle
@@ -1853,9 +1864,11 @@ other engine owns the state.
   `invisible_engine_dots/UPSTREAM.md`): the app shells, the channels, the bus
   and the commands, the agent loop and its hooks, the other approval and guard
   mechanisms (the workspace path policy, the command guard, the sandbox, the
-  SSRF guard), subagents, skills, the web tools, image and document reading,
-  the usage telemetry, the configuration files and every provider but
-  OpenRouter.
+  SSRF guard), subagents, nanobot's skill machinery (the Dot's skills are its
+  own, section 8.6), the web tools, image and document reading, the usage
+  telemetry, the configuration files, every provider but OpenRouter, and the
+  options nothing of the Dot sets (reasoning effort, concurrent tool batches,
+  the spill of a long result to a file, the event sink, the MCP reconnect).
 
 ## 9. Control plane
 

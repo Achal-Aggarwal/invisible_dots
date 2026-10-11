@@ -1,4 +1,4 @@
-"""Tests for AgentRunner tool execution: batching, concurrency, exclusive tools."""
+"""Tests for AgentRunner tool execution."""
 
 from __future__ import annotations
 
@@ -27,15 +27,11 @@ class _DelayTool(Tool):
         name: str,
         *,
         delay: float,
-        read_only: bool,
         shared_events: list[str],
-        exclusive: bool = False,
     ):
         self._name = name
         self._delay = delay
-        self._read_only = read_only
         self._shared_events = shared_events
-        self._exclusive = exclusive
 
     @property
     def name(self) -> str:
@@ -48,14 +44,6 @@ class _DelayTool(Tool):
     @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {}, "required": []}
-
-    @property
-    def read_only(self) -> bool:
-        return self._read_only
-
-    @property
-    def exclusive(self) -> bool:
-        return self._exclusive
 
     async def execute(self, **kwargs):
         self._shared_events.append(f"start:{self._name}")
@@ -97,7 +85,6 @@ async def _run_optional_tool_response(response: LLMResponse):
     tools.register(_DelayTool(
         "optional_tool",
         delay=0,
-        read_only=True,
         shared_events=shared_events,
     ))
 
@@ -127,7 +114,6 @@ async def test_tool_execution_propagates_preparation_failure():
         await execute_tool_calls(
             tools,
             [ToolCallRequest(id="call-1", name="demo", arguments={})],
-            concurrent=False,
             hook=AgentHook(),
             context=AgentHookContext(iteration=0, messages=[]),
             gate=AllowAllGate(),
@@ -166,79 +152,12 @@ async def test_tool_execution_propagates_cancellation_without_error_hook():
         await execute_tool_calls(
             tools,
             [ToolCallRequest(id="call-1", name="demo", arguments={})],
-            concurrent=False,
             hook=RecordingHook(),
             context=AgentHookContext(iteration=0, messages=[]),
             gate=AllowAllGate(),
         )
 
     assert events == ["before"]
-
-
-@pytest.mark.asyncio
-async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
-    tools = ToolRegistry()
-    shared_events: list[str] = []
-    read_a = _DelayTool("read_a", delay=0.05, read_only=True, shared_events=shared_events)
-    read_b = _DelayTool("read_b", delay=0.05, read_only=True, shared_events=shared_events)
-    write_a = _DelayTool("write_a", delay=0.01, read_only=False, shared_events=shared_events)
-    tools.register(read_a)
-    tools.register(read_b)
-    tools.register(write_a)
-
-    await execute_tool_calls(
-        tools,
-        [
-            ToolCallRequest(id="ro1", name="read_a", arguments={}),
-            ToolCallRequest(id="ro2", name="read_b", arguments={}),
-            ToolCallRequest(id="rw1", name="write_a", arguments={}),
-        ],
-        concurrent=True,
-        hook=AgentHook(),
-        context=AgentHookContext(iteration=0, messages=[]),
-        gate=AllowAllGate(),
-    )
-
-    assert shared_events[0:2] == ["start:read_a", "start:read_b"]
-    assert "end:read_a" in shared_events and "end:read_b" in shared_events
-    assert shared_events.index("end:read_a") < shared_events.index("start:write_a")
-    assert shared_events.index("end:read_b") < shared_events.index("start:write_a")
-    assert shared_events[-2:] == ["start:write_a", "end:write_a"]
-
-
-@pytest.mark.asyncio
-async def test_tool_execution_does_not_batch_exclusive_read_only_tools():
-    tools = ToolRegistry()
-    shared_events: list[str] = []
-    read_a = _DelayTool("read_a", delay=0.03, read_only=True, shared_events=shared_events)
-    read_b = _DelayTool("read_b", delay=0.03, read_only=True, shared_events=shared_events)
-    ddg_like = _DelayTool(
-        "ddg_like",
-        delay=0.01,
-        read_only=True,
-        shared_events=shared_events,
-        exclusive=True,
-    )
-    tools.register(read_a)
-    tools.register(ddg_like)
-    tools.register(read_b)
-
-    await execute_tool_calls(
-        tools,
-        [
-            ToolCallRequest(id="ro1", name="read_a", arguments={}),
-            ToolCallRequest(id="ddg1", name="ddg_like", arguments={}),
-            ToolCallRequest(id="ro2", name="read_b", arguments={}),
-        ],
-        concurrent=True,
-        hook=AgentHook(),
-        context=AgentHookContext(iteration=0, messages=[]),
-        gate=AllowAllGate(),
-    )
-
-    assert shared_events[0] == "start:read_a"
-    assert shared_events.index("end:read_a") < shared_events.index("start:ddg_like")
-    assert shared_events.index("end:ddg_like") < shared_events.index("start:read_b")
 
 
 @pytest.mark.asyncio
@@ -271,7 +190,6 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
     tools.register(_DelayTool(
         "read_file",
         delay=0,
-        read_only=True,
         shared_events=shared_events,
     ))
 

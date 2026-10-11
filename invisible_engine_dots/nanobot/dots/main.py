@@ -1,7 +1,7 @@
 """The entry point of the Dot's engine: `python -I -B -m nanobot`.
 
-It reads the environment once, refuses to start when a credential is on disk or
-another engine owns the state, builds the engine and serves the Dot's API on
+It reads the environment once, refuses to start when another engine owns the
+state, builds the engine and serves the Dot's API on
 its unix socket until SIGTERM or SIGINT. Nothing else of the process reads the
 environment: every value travels down as an argument.
 """

@@ -436,7 +436,7 @@ export interface AgentStateAnswer {
  */
 export const FRAME_ERROR_CODES = { notOpen: "not_open", busy: "busy" } as const satisfies Record<string, IdentityErrorCode>;
 
-export const BROWSER_IDENTITY_STATUSES = ["available", "open", "archived"] as const;
+export const BROWSER_IDENTITY_STATUSES = ["available", "open"] as const;
 export type BrowserIdentityStatus = (typeof BROWSER_IDENTITY_STATUSES)[number];
 
 /** One browser identity, as the engine's identity routes return it (the row of `dots_browser_identities`). */

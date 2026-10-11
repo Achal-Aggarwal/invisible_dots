@@ -102,7 +102,7 @@ class _StderrTail:
 
 class McpServerTool(Tool):
     """A tool of a declared MCP server on the Dot's registry: the client's own (name, description, schema), called on
-    the server's registry at call time, so a reconnect that replaced it is followed, with its images shown."""
+    the server's registry at call time, so a restart that replaced it is followed, with its images shown."""
 
     def __init__(self, server: str, registry: ToolRegistry, wrapped: Tool) -> None:
         self._server = server
@@ -110,7 +110,6 @@ class McpServerTool(Tool):
         self._name = wrapped.name
         self._description = wrapped.description
         self._parameters = wrapped.parameters
-        self._read_only = wrapped.read_only
 
     @property
     def name(self) -> str:
@@ -123,10 +122,6 @@ class McpServerTool(Tool):
     @property
     def parameters(self) -> dict[str, Any]:
         return self._parameters
-
-    @property
-    def read_only(self) -> bool:
-        return self._read_only
 
     @property
     def server(self) -> str:

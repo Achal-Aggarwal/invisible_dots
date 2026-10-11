@@ -153,7 +153,7 @@ async def test_only_repeat_reads_scan_model_results_once_per_batch(tmp_path, ope
         calls.append(ToolCallRequest(id="batch-2", name=name, arguments=arguments))
 
     results, _ = await execute_tool_calls(
-        tools, calls, concurrent=True,
+        tools, calls,
         hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]), gate=AllowAllGate(),
         model_messages=messages,
     )
@@ -184,7 +184,6 @@ async def test_failed_file_read_restores_context(tmp_path, monkeypatch, error):
     monkeypatch.setattr(tool, "execute", fail)
     request = execute_tool_calls(
         tools, [ToolCallRequest(id="failed-read", name="read_file", arguments={"path": "data.txt"})],
-        concurrent=False,
         hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]), gate=AllowAllGate(),
         model_messages=first.messages,
     )

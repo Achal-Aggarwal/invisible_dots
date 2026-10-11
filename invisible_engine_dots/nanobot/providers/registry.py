@@ -22,10 +22,6 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (Claude models behind a gateway).
     supports_prompt_caching: bool = False
 
-    # Gateway-native reasoning control to pair with model-level thinking styles.
-    # "reasoning_effort" -> {"reasoning": {"effort": <none|minimal|...>}} (OpenRouter)
-    gateway_reasoning_style: str = ""
-
 
 OPENROUTER = ProviderSpec(
     name="openrouter",
@@ -33,5 +29,4 @@ OPENROUTER = ProviderSpec(
     default_api_base="https://openrouter.ai/api/v1",
     is_gateway=True,
     supports_prompt_caching=True,
-    gateway_reasoning_style="reasoning_effort",
 )

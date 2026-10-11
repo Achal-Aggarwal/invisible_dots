@@ -9,7 +9,6 @@ from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
     LLMResponse,
-    ProviderCallContext,
     ToolCallRequest,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -35,7 +34,6 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
         nonlocal first_calls, selected_runtime
         first_calls += 1
         request_temperatures.append(kwargs["temperature"])
-        assert isinstance(kwargs["provider_context"], ProviderCallContext)
         selected_runtime = LLMRuntime.capture(
             second_provider,
             "future-model",

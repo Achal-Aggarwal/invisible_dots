@@ -62,7 +62,6 @@ async def test_tool_execution_does_not_duplicate_existing_retry_hint():
     results, events = await execute_tool_calls(
         tools,
         [ToolCallRequest(id="call_1", name="list_dir", arguments={})],
-        concurrent=False,
         hook=AgentHook(),
         context=AgentHookContext(iteration=0, messages=[]),
         gate=AllowAllGate(),
@@ -84,7 +83,6 @@ async def test_tool_execution_propagates_control_flow_exceptions(control_error: 
         await execute_tool_calls(
             tools,
             [ToolCallRequest(id="call_1", name="list_dir", arguments={})],
-            concurrent=False,
             hook=AgentHook(),
             context=AgentHookContext(iteration=0, messages=[]),
             gate=AllowAllGate(),

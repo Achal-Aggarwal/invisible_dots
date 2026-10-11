@@ -83,19 +83,6 @@ class TestAChatTurn:
         assert h.inbound_state("in1") == "applied"
         assert h.host.events == [("run_started", CHAT)]
 
-    async def test_the_model_is_asked_with_no_event_sink_so_no_retry_notification_is_sent(
-        self, make_harness: MakeHarness
-    ) -> None:
-        # UPSTREAM.md keeps LLMProvider's retry notifications only for upstream's tests: they go through
-        # the provider context's event sink, and a Dot's turn gives it none.
-        h = make_harness([says("hi there")])
-        h.accept("in1")
-
-        await h.run(chat_unit())
-
-        (context,) = h.provider.contexts
-        assert context.events.publish is None
-
     async def test_the_model_is_asked_with_the_dot_prompt_and_the_history(self, make_harness: MakeHarness) -> None:
         h = make_harness([says("one"), says("two")])
         h.accept("in1")

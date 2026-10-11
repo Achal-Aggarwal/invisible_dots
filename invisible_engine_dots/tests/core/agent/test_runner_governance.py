@@ -17,7 +17,6 @@ from nanobot.agent.context_governance import (
     ModelRequestState,
 )
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.events import ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -50,7 +49,6 @@ def _governance_config(
         provider=provider,
         model=spec.runtime.model,
         tools=tools,
-        workspace=spec.workspace,
         session_key=spec.session_key,
         max_tool_result_chars=spec.max_tool_result_chars,
         context_window_tokens=spec.runtime.context_window_tokens,
@@ -69,32 +67,6 @@ def _compaction_state(spec: AgentRunSpec) -> ContextCompactionState:
         spec.consolidate_history,
     )
     return state
-
-
-async def test_provider_can_emit_without_an_event_specific_runner_callback():
-    from nanobot.events import AgentEvent
-
-    event = AgentEvent()
-    received = []
-
-    async def observe(value):
-        received.append(value)
-
-    async def request(*, provider_context, **kwargs):
-        await provider_context.events.emit(event)
-        return LLMResponse(content="done")
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = request
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-    await AgentRunner().run(make_run_spec(
-        provider, model="test-model", tools=tools, max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        initial_messages=[{"role": "user", "content": "hello"}],
-        events=EventSink(observe),
-    ))
-    assert received == [event]
 
 
 async def test_runner_propagates_context_governance_failure():
@@ -370,11 +342,6 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         "checkpoint-1",
         "checkpoint-2",
     ])
-    compaction_events: list[ContextCompactionEvent] = []
-
-    async def observe_compaction(event: ContextCompactionEvent) -> None:
-        compaction_events.append(event)
-
     result = await AgentRunner().run(make_run_spec(
         provider,
         initial_messages=None,
@@ -387,7 +354,6 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         max_tokens=100,
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        events=EventSink(observe_compaction),
     ))
 
     assert consolidate.await_count == 2
@@ -400,13 +366,6 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     assert result.summary_checkpoint is not None
     assert result.summary_checkpoint.summary == "checkpoint-2"
     assert result.summary_checkpoint.transcript_boundary == 4
-    assert [event.phase for event in compaction_events] == [
-        "started", "succeeded", "started", "succeeded",
-    ]
-    first_id, second_id = compaction_events[0].compaction_id, compaction_events[2].compaction_id
-    assert first_id == compaction_events[1].compaction_id
-    assert second_id == compaction_events[3].compaction_id
-    assert first_id != second_id
 
 
 async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch):

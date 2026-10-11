@@ -191,13 +191,11 @@ class TestConsolidatorSummarize:
             generation=GenerationSettings(
                 temperature=0.25,
                 max_tokens=321,
-                reasoning_effort="medium",
             ),
         )
         mock_provider.generation = GenerationSettings(
             temperature=0.9,
             max_tokens=999,
-            reasoning_effort="high",
         )
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="Summary.",
@@ -210,7 +208,6 @@ class TestConsolidatorSummarize:
         assert call["model"] == admitted.model
         assert call["temperature"] == 0.25
         assert call["max_tokens"] == 321
-        assert call["reasoning_effort"] == "medium"
 
     async def test_summarize_returns_the_model_summary(
         self, consolidator, mock_provider, runtime

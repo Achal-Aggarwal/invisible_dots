@@ -125,7 +125,6 @@ def _request_state(messages: list[dict[str, Any]], window: int, longest_answer: 
             provider=provider,
             model="m",
             tools=MagicMock(),
-            workspace=None,
             session_key="s",
             max_tool_result_chars=1_000_000,
             context_window_tokens=window,

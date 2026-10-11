@@ -66,6 +66,11 @@ async def until(predicate, timeout: float = 5.0) -> None:  # type: ignore[no-unt
     assert predicate()
 
 
+async def tick_done(service: CronService) -> None:
+    """The tick that ran the jobs (one was seen running) has finished, its results saved."""
+    await until(lambda: service._active_executions == 0)
+
+
 async def started(path: Path, fired: Fired) -> CronService:
     service = CronService(path, on_job=fired.on_job)
     await service.start()
@@ -81,7 +86,7 @@ class TestJobsMissedWhileOff:
 
         service = await started(path, fired)
         await until(lambda: fired.ids)
-        await asyncio.sleep(0.05)
+        await tick_done(service)
         service.stop()
 
         assert fired.runs == [("remind", due)]
@@ -97,7 +102,7 @@ class TestJobsMissedWhileOff:
 
         service = await started(path, fired)
         await until(lambda: fired.ids)
-        await asyncio.sleep(0.05)
+        await tick_done(service)
         service.stop()
 
         assert fired.ids == ["once"]
@@ -120,7 +125,7 @@ class TestJobsMissedWhileOff:
 
         service = await started(path, fired)
         await until(lambda: len(fired.ids) >= 2)
-        await asyncio.sleep(0.1)
+        await tick_done(service)
         service.stop()
 
         assert sorted(fired.ids) == ["cron-minutely", "minutely"]
@@ -138,7 +143,7 @@ class TestJobsMissedWhileOff:
 
         service = await started(path, fired)
         await until(lambda: fired.ids)
-        await asyncio.sleep(0.05)
+        await tick_done(service)
         service.stop()
 
         saved = json.loads(path.read_text(encoding="utf-8"))["jobs"][0]["state"]
@@ -151,7 +156,8 @@ class TestJobsMissedWhileOff:
         fired = Fired()
 
         service = await started(path, fired)
-        await asyncio.sleep(0.1)
+        # A tick, which runs every job that is due: none is.
+        await service._on_timer()
         service.stop()
 
         assert fired.runs == []
@@ -166,7 +172,7 @@ class TestJobsNotYetDue:
         fired = Fired()
 
         service = await started(path, fired)
-        await asyncio.sleep(0.05)
+        await service._on_timer()
         service.stop()
 
         assert fired.runs == []
@@ -211,7 +217,7 @@ class TestTheNextRunIsReported:
 
         assert heard[-1] is None
 
-    async def test_adding_pausing_resuming_and_removing_a_job_each_report_the_new_earliest_time(
+    async def test_adding_and_removing_a_job_each_report_the_new_earliest_time(
         self, tmp_path: Path
     ) -> None:
         service, heard = self.make(tmp_path)
@@ -222,26 +228,10 @@ class TestTheNextRunIsReported:
             far = service.add_job("far", CronSchedule(kind="every", every_ms=10 * HOUR_MS), "go")
             assert heard[-1] == soon.state.next_run_at_ms
 
-            service.enable_job(soon.id, False)
-            assert heard[-1] == far.state.next_run_at_ms
-            resumed = service.enable_job(soon.id, True)
-            assert resumed is not None and heard[-1] == resumed.state.next_run_at_ms
-
             service.remove_job(soon.id)
             assert heard[-1] == far.state.next_run_at_ms
             service.remove_job(far.id)
             assert heard[-1] is None
-        finally:
-            service.stop()
-
-    async def test_changing_a_schedule_reports_the_new_time(self, tmp_path: Path) -> None:
-        service, heard = self.make(tmp_path)
-        await service.start()
-        try:
-            job = service.add_job("edit", CronSchedule(kind="every", every_ms=HOUR_MS), "go")
-            changed = service.update_job(job.id, schedule=CronSchedule(kind="every", every_ms=9 * HOUR_MS))
-            assert isinstance(changed, CronJob)
-            assert heard[-1] == changed.state.next_run_at_ms
         finally:
             service.stop()
 

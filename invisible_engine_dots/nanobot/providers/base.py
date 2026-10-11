@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -17,22 +16,11 @@ from typing import Any, Literal, cast
 import json_repair
 from loguru import logger
 
-from nanobot.events import (
-    NO_EVENTS,
-    EventSink,
-    ResponseSource,
-    ResponseSourceEvent,
-    RetryStatusEvent,
-    RetryWaitEvent,
-)
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
 STREAM_IDLE_TIMEOUT_S = 90.0
 RETRY_AFTER_BUFFER = 1
 CONTEXT_SAFETY_BUFFER = 1024
-
-RetryEventCallback = Callable[[str], Awaitable[None]]
-RetryStatusCallback = Callable[[RetryStatusEvent], Awaitable[None]]
 
 
 @dataclass
@@ -136,21 +124,6 @@ def tool_arguments_object_for_replay(arguments: Any) -> dict[str, Any]:
 def tool_arguments_json_for_replay(arguments: Any) -> str:
     """Return JSON object string arguments for provider history replay only."""
     return json.dumps(tool_arguments_object_for_replay(arguments), ensure_ascii=False)
-
-
-@dataclass(frozen=True)
-class ProviderCallContext:
-    """What the retry chain needs to know about one model request.
-
-    The ``chat_stream`` contract stays provider-agnostic; a provider that
-    consumes this context does so through ``chat_stream_with_context``, and
-    every other provider inherits the context-free delegation.
-    """
-
-    events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
-    # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
-    response_preset: str | None = None
-    response_is_fallback: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,7 +356,6 @@ class GenerationSettings:
 
     temperature: float = 0.7
     max_tokens: int | None = None
-    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -406,7 +378,6 @@ class LLMProvider(ABC):
     """Base class for LLM providers."""
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
-    _RETRY_HEARTBEAT_CHUNK = 30
     _TRANSIENT_ERROR_MARKERS = (
         "429",
         "rate limit",
@@ -936,7 +907,6 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: int | None = None,
         temperature: float = 0.7,
-        reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Send one chat completion request and return the whole answer.
@@ -946,25 +916,9 @@ class LLMProvider(ABC):
         is "error", built from ``_error_response_from_exception``.
         """
 
-    async def chat_stream_with_context(
-        self,
-        *,
-        provider_context: ProviderCallContext,
-        **kwargs: Any,
-    ) -> LLMResponse:
-        """Streaming continuation hook with a context-free default."""
-        _ = provider_context
-        return await self.chat_stream(**kwargs)
-
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
         """Call chat_stream() and convert unexpected exceptions to error responses."""
         try:
-            provider_context = kwargs.pop("provider_context", None)
-            if isinstance(provider_context, ProviderCallContext):
-                return await self.chat_stream_with_context(
-                    provider_context=provider_context,
-                    **kwargs,
-                )
             return await self.chat_stream(**kwargs)
         except asyncio.CancelledError:
             raise
@@ -978,108 +932,19 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: object = _SENTINEL,
         temperature: object = _SENTINEL,
-        reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
-        on_retry_wait: RetryEventCallback | None = None,
-        provider_context: ProviderCallContext | None = None,
-        on_retry_exhausted: RetryEventCallback | None = None,
-        on_retry_status: RetryStatusCallback | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL or max_tokens is None:
             max_tokens = self.generation.max_tokens
         if temperature is self._SENTINEL or temperature is None:
             temperature = self.generation.temperature
-        if reasoning_effort is self._SENTINEL:
-            reasoning_effort = self.generation.reasoning_effort
 
         kw: dict[str, Any] = dict(
             messages=messages, tools=tools, model=model,
-            max_tokens=max_tokens, temperature=temperature,
-            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            max_tokens=max_tokens, temperature=temperature, tool_choice=tool_choice,
         )
-        if provider_context is not None:
-            kw["provider_context"] = provider_context
-        on_retry_wait, on_retry_exhausted, on_retry_status = await self._retry_notifications(
-            provider_context, on_retry_wait, on_retry_exhausted, on_retry_status,
-        )
-        return await self._run_chat_with_retry(
-            kw,
-            messages,
-            on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted,
-            on_retry_status=on_retry_status,
-        )
-
-    @staticmethod
-    async def _retry_notifications(
-        context: ProviderCallContext | None,
-        on_wait: RetryEventCallback | None,
-        on_exhausted: RetryEventCallback | None,
-        on_status: RetryStatusCallback | None,
-    ) -> tuple[RetryEventCallback | None, RetryEventCallback | None, RetryStatusCallback | None]:
-        """Adapt once at the retry-chain boundary, before candidate callbacks.
-
-        Explicit callbacks retain precedence. In particular a fallback candidate
-        exhaustion callback captures its result; it must not also notify the UI.
-        """
-        if on_wait is None and context is not None and context.events.publish is not None:
-            async def publish(content: str) -> None:
-                await context.events.emit(RetryWaitEvent(content))
-
-            on_wait = publish
-        if on_status is None and context is not None and context.events.accepts(RetryStatusEvent):
-            on_status = context.events.emit
-            # A turn may continue after an exhausted request; the new chain owns
-            # its own retry state, including when its first attempt is terminal.
-            await on_status(RetryStatusEvent("cleared", 1, None, "unknown"))
-        return on_wait, on_exhausted or on_wait, on_status
-
-    async def _run_chat_with_retry(
-        self,
-        kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
-        *,
-        on_retry_wait: RetryEventCallback | None,
-        on_retry_exhausted: RetryEventCallback | None,
-        on_retry_status: RetryStatusCallback | None,
-    ) -> LLMResponse:
-        """Run one chat entry point through this provider's retry policy."""
-        call = self._safe_chat_stream
-
-        async def attributed_call(**kwargs: Any) -> LLMResponse:
-            context = kwargs.get("provider_context")
-            if (
-                not isinstance(context, ProviderCallContext)
-                or context.response_preset is None
-                or not context.events.accepts(ResponseSourceEvent)
-            ):
-                return await call(**kwargs)
-            source = (
-                ResponseSource(
-                    provider=self.provider_name,
-                    model=kwargs.get("model") or self.get_default_model(),
-                    preset=context.response_preset,
-                    fallback=context.response_is_fallback,
-                )
-                if context.response_preset else None
-            )
-            await context.events.emit(ResponseSourceEvent(None))
-            response = await call(**kwargs)
-            await context.events.emit(ResponseSourceEvent(
-                source if response.finish_reason != "error" and response.content else None,
-                content=response.content if response.finish_reason != "error" else None,
-            ))
-            return response
-
-        return await self._run_with_retry(
-            attributed_call,
-            kw,
-            original_messages,
-            on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted,
-            on_retry_status=on_retry_status,
-        )
+        return await self._run_with_retry(self._safe_chat_stream, kw, messages)
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:
@@ -1168,38 +1033,6 @@ class LLMProvider(ABC):
             return response.retry_after
         return cls._extract_retry_after(response.content)
 
-    async def _sleep_with_heartbeat(
-        self,
-        delay: float,
-        *,
-        attempt: int,
-        error_kind: str,
-        max_attempts: int,
-        on_retry_wait: RetryEventCallback | None = None,
-        on_retry_status: RetryStatusCallback | None = None,
-    ) -> None:
-        next_retry_at = time.time() + max(0.0, delay)
-        remaining = max(0.0, delay)
-        while remaining > 0:
-            if on_retry_wait:
-                await on_retry_wait(
-                    f"Model request failed, retry in {max(1, int(round(remaining)))}s "
-                    f"(attempt {attempt})."
-                )
-            if on_retry_status:
-                await on_retry_status(
-                    RetryStatusEvent(
-                        state="waiting",
-                        attempt=attempt,
-                        max_attempts=max_attempts,
-                        error_kind=error_kind,
-                        next_retry_at=next_retry_at,
-                    )
-                )
-            chunk = min(remaining, self._RETRY_HEARTBEAT_CHUNK)
-            await asyncio.sleep(chunk)
-            remaining -= chunk
-
     @classmethod
     def public_error_kind(cls, response: LLMResponse) -> str:
         """Return a stable public category without exposing provider details."""
@@ -1219,34 +1052,15 @@ class LLMProvider(ABC):
         call: Callable[..., Awaitable[LLMResponse]],
         kw: dict[str, Any],
         original_messages: list[dict[str, Any]],
-        *,
-        on_retry_wait: RetryEventCallback | None,
-        on_retry_exhausted: RetryEventCallback | None,
-        on_retry_status: RetryStatusCallback | None,
     ) -> LLMResponse:
         attempt = 0
         delays = list(self._CHAT_RETRY_DELAYS)
         last_response: LLMResponse | None = None
 
-        async def _finish_retry_status(
-            state: Literal["recovered", "cleared"],
-            response: LLMResponse,
-        ) -> None:
-            if attempt > 1 and on_retry_status:
-                await on_retry_status(
-                    RetryStatusEvent(
-                        state=state,
-                        attempt=attempt,
-                        max_attempts=len(delays) + 1,
-                        error_kind=self.public_error_kind(response),
-                    )
-                )
-
         while True:
             attempt += 1
             response = await call(**kw)
             if response.finish_reason != "error":
-                await _finish_retry_status("recovered", response)
                 return response
             last_response = response
             if not self.is_transient_response(response):
@@ -1262,12 +1076,7 @@ class LLMProvider(ABC):
                     # subsequent iterations do not repeat the error-retry cycle.
                     if result.finish_reason != "error":
                         self._strip_image_content_inplace(original_messages)
-                    await _finish_retry_status(
-                        "recovered" if result.finish_reason != "error" else "cleared",
-                        result,
-                    )
                     return result
-                await _finish_retry_status("cleared", response)
                 return response
 
             if attempt > len(delays):
@@ -1276,19 +1085,6 @@ class LLMProvider(ABC):
                     attempt,
                     (response.content or "")[:120].lower(),
                 )
-                if on_retry_exhausted:
-                    await on_retry_exhausted(
-                        f"Model request failed after {attempt} attempts, giving up."
-                    )
-                if on_retry_status:
-                    await on_retry_status(
-                        RetryStatusEvent(
-                            state="exhausted",
-                            attempt=attempt,
-                            max_attempts=len(delays) + 1,
-                            error_kind=self.public_error_kind(response),
-                        )
-                    )
                 break
 
             retry_after = self._extract_retry_after_from_response(response)
@@ -1302,14 +1098,7 @@ class LLMProvider(ABC):
                 int(round(delay)),
                 (response.content or "")[:120].lower(),
             )
-            await self._sleep_with_heartbeat(
-                delay,
-                attempt=attempt,
-                error_kind=self.public_error_kind(response),
-                max_attempts=len(delays) + 1,
-                on_retry_wait=on_retry_wait,
-                on_retry_status=on_retry_status,
-            )
+            await asyncio.sleep(max(0.0, delay))
 
         return last_response if last_response is not None else await call(**kw)  # pyright: ignore[reportUnnecessaryComparison]
 
