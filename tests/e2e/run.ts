@@ -778,7 +778,7 @@ async function main(): Promise<void> {
     // research open, as it would be left at night
     const relaunch = async (what: string): Promise<void> => {
       const task = await runTask(
-        `With the existing browser identity whose id is ${research.id}: open its browser with browser_identity_launch if it is not open, open https://example.com in it with browser_navigate, and answer with only the page title. Do not create a new identity. (${what})`,
+        `With the existing browser identity whose id is ${research.id}: open its browser with browser_identity_launch if it is not open, open https://example.com in it with browser_navigate, and answer with only the page title. Do not create a new identity, and leave its browser open when you are done. (${what})`,
       );
       const all = await events(dotId);
       assert(toolOk(all, task.id, "browser_navigate"), `the ${what} task did not navigate (tools: ${describeTools(all, task.id)})`);
