@@ -18,8 +18,11 @@ ENGINE_PY=/opt/invisible-dots-engine/bin/python
 # The key has this one owner; the stand-in gets it on its command line (not its environment: a check
 # asserts that no process environment holds it) and refuses to start without it.
 KEY=sk-or-v1-smoke-0123456789abcdef
-# What the units give the engine and the desktop: the display and uv's bin dir (invisible-dots-agent.service).
-GUEST_PATH=/home/dot/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# What the engine's unit gives it, read from the unit itself: a PATH of system directories, and the browser's MCP
+# server named by its path (dot's, in ~/.local/bin).
+ENGINE_UNIT="$SMOKE_DIR/../../units/invisible-dots-agent.service"
+ENGINE_PATH=$(sed -n 's/^Environment=PATH=//p' "$ENGINE_UNIT")
+ENGINE_MCP_COMMAND=$(sed -n 's/^Environment=INVISIBLE_DOTS_MCP_COMMAND=//p' "$ENGINE_UNIT")
 # What the unit gives dot-agentd, read from the unit itself so the smoke starts the daemon with the PATH the
 # image has: system directories only, none of them dot's (a program the daemon starts as itself, the poweroff,
 # is found through it).
@@ -82,7 +85,7 @@ start_fake_openrouter() {
 # engine as dotengine, restarted by
 # start_engine when it dies as systemd would (KillMode=control-group: every process of the engine goes
 # with it). The engine's environment is its unit's, plus the program it runs for a browser when
-# MCP_COMMAND names one (without it the engine finds invisible-playwright-mcp on its PATH).
+# MCP_COMMAND names one (without it, the unit's: the real server in dot's ~/.local/bin).
 start_guest_daemons() {
   setpriv --reuid=dotagentd --regid=dotagentd --init-groups \
     --inh-caps=+setuid,+setgid,+kill --ambient-caps=+setuid,+setgid,+kill \
@@ -90,14 +93,14 @@ start_guest_daemons() {
     /opt/invisible-dots/bin/dot-agentd --listen 127.0.0.1:1024 > /tmp/agentd.log 2>&1 &
   cat > /tmp/engine.sh <<EOF
 export HOME=/home/dotengine
-export PATH=$GUEST_PATH
+export PATH=$ENGINE_PATH
 export DISPLAY=:0
 export TIKTOKEN_CACHE_DIR=/opt/invisible-dots-engine/share/tiktoken
 export INVISIBLE_DOTS_ENGINE_STATE=/home/dotengine/state
 export INVISIBLE_DOTS_AGENT_SOCKET=/run/invisible-dots-agent/agent.sock INVISIBLE_DOTS_AGENTD_SOCKET=/run/invisible-dots/agentd.sock
 export INVISIBLE_DOTS_AGENTD_BIN=/opt/invisible-dots/bin/dot-agentd INVISIBLE_DOTS_WORKSPACE=/home/dot/workspace
 export INVISIBLE_DOTS_OPENROUTER_URL=http://127.0.0.1:9999/api/v1 INVISIBLE_DOTS_NETWORK_CHECK=127.0.0.1:9999
-${MCP_COMMAND:+export INVISIBLE_DOTS_MCP_COMMAND=$MCP_COMMAND}
+export INVISIBLE_DOTS_MCP_COMMAND=${MCP_COMMAND:-$ENGINE_MCP_COMMAND}
 umask 0002
 cd /home/dotengine
 exec /opt/invisible-dots-engine/bin/python -I -B -m nanobot

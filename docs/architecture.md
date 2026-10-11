@@ -495,7 +495,11 @@ poweroff`, `/bin/bash`, `/usr/bin/import`): a `sudo` planted in dot's
 `~/.local/bin` (dot owns its home and can open it) would otherwise be run as
 `dotagentd` by the next poweroff. The `PATH` of the model's commands, dot's
 `~/.local/bin` in front of the system's, is built by the daemon with the rest of
-their environment (`execEnv`), not inherited from its own.
+their environment (`execEnv`), not inherited from its own. The engine, which holds
+the OpenRouter key, has the same rule: its unit's `PATH` is system directories
+only, and the one program of dot's it needs, the browser's MCP server, is named by
+its path (`INVISIBLE_DOTS_MCP_COMMAND=/home/dot/.local/bin/invisible-playwright-mcp`)
+and started as dot through the relay.
 
 What this closes: no process of the model's shares a uid with a daemon, so the
 model can neither read the Dot's token nor read the memory of dot-agentd or of
@@ -1599,7 +1603,7 @@ once, in `main.py`: `INVISIBLE_DOTS_AGENT_SOCKET`,
 `INVISIBLE_DOTS_AGENTD_SOCKET`, `INVISIBLE_DOTS_AGENTD_BIN`,
 `INVISIBLE_DOTS_WORKSPACE`, `INVISIBLE_DOTS_ENGINE_STATE`,
 `INVISIBLE_DOTS_NETWORK_CHECK` (the host the network check reaches),
-`INVISIBLE_DOTS_MCP_COMMAND` (the browser server's command),
+`INVISIBLE_DOTS_MCP_COMMAND` (the browser server's command; the unit names it by its path in dot's `~/.local/bin`),
 `INVISIBLE_DOTS_MODEL_USER` (the user of the model's commands, whom the API
 socket refuses), and for tests and the smoke `INVISIBLE_DOTS_OPENROUTER_URL`.
 Before it serves it checks that no other engine owns the state.
