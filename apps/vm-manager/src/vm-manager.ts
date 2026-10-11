@@ -42,7 +42,8 @@ import { GuestClient, waitForGuestHealth, type GuestClientOptions, type WaitForG
 import { accelerator as hostAccelerator, findQemu, type Accelerator, type QemuInstallation } from "./host.js";
 import { stderrLogger, type Logger } from "./logger.js";
 import { pickFreePort, portListens } from "./ports.js";
-import { CPU_MODEL, qemuArgs, qemuPathArg } from "./qemu-args.js";
+import { readProcessFile, writeProcessFile, type ProcessFile } from "./process-file.js";
+import { checkVmResources, CPU_MODEL, qemuArgs, qemuPathArg } from "./qemu-args.js";
 import {
   fileSize,
   NodeCommandRunner,
@@ -182,12 +183,6 @@ function assertDotId(dotId: string): void {
   }
 }
 
-function assertIntInRange(label: string, value: number, min: number, max: number): void {
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw new VmManagerError(`${label} must be an integer from ${min} to ${max}, got ${value}`);
-  }
-}
-
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -218,18 +213,6 @@ const CPU_MODEL_FAILURES = [/CPU model 'host' requires/i, /unable to find CPU mo
 /** How much of the end of a log goes into an error: enough for QEMU's last words and the guest's last boot lines. */
 const LOG_TAIL_BYTES = 4 * 1024;
 
-/**
- * The pid file (section 3.2): the QEMU process of a Dot, the guest port it
- * forwards, and the host's uptime when it was spawned. A host uptime lower
- * than that one means the host restarted since, so the process is gone
- * whatever now runs under that pid.
- */
-export interface ProcessFile {
-  pid: number;
-  guest_port: number;
-  host_uptime_s?: number;
-}
-
 /** seed-instance.json, or undefined for one this code did not write: the next seed then takes the content's own id. */
 function parsePreviousSeed(text: string): PreviousSeed | undefined {
   try {
@@ -237,22 +220,6 @@ function parsePreviousSeed(text: string): PreviousSeed | undefined {
     if (typeof value.digest === "string" && typeof value.instanceId === "string") return { digest: value.digest, instanceId: value.instanceId };
   } catch {
     // Not JSON: as if there were none.
-  }
-  return undefined;
-}
-
-function parseProcessFile(text: string): ProcessFile | undefined {
-  try {
-    const value = JSON.parse(text) as Partial<ProcessFile>;
-    const pid = value.pid;
-    const port = value.guest_port;
-    if (Number.isSafeInteger(pid) && pid! > 0 && Number.isInteger(port) && port! >= 1 && port! <= 65535) {
-      const record: ProcessFile = { pid: pid!, guest_port: port! };
-      if (typeof value.host_uptime_s === "number" && Number.isFinite(value.host_uptime_s)) record.host_uptime_s = value.host_uptime_s;
-      return record;
-    }
-  } catch {
-    // Falls through: not JSON is as unreadable as JSON of the wrong shape.
   }
   return undefined;
 }
@@ -389,14 +356,23 @@ export class VmManager {
 
   private validateSpec(spec: VmSpec): void {
     assertDotId(spec.dotId);
-    assertIntInRange("cpus", spec.cpus, 1, 16);
-    assertIntInRange("memoryMiB", spec.memoryMiB, 256, 64 * 1024);
+    checkVmResources(spec);
     if (!Number.isSafeInteger(spec.diskBytes) || spec.diskBytes <= 0) {
       throw new VmManagerError(`diskBytes must be a positive integer, got ${spec.diskBytes}`);
     }
     if (!spec.token) throw new VmManagerError("the Dot token is empty");
     if (!isAbsolute(spec.goldenImage) || !isAbsolute(spec.runtimeImage)) {
       throw new VmManagerError("goldenImage and runtimeImage must be absolute paths: QEMU runs detached and qemu-img records the backing path");
+    }
+  }
+
+  /** Both images of the spec exist: a VM is never created or started on a path that leads nowhere. */
+  private async assertImages(spec: VmSpec): Promise<void> {
+    for (const [label, path] of [
+      ["golden image", spec.goldenImage],
+      ["runtime ISO", spec.runtimeImage],
+    ] as const) {
+      if (!(await exists(path))) throw new VmManagerError(`${label} ${path} does not exist: build it with "invisible-dots image build" first`);
     }
   }
 
@@ -426,12 +402,7 @@ export class VmManager {
   async create(spec: VmSpec): Promise<CreateVmResult> {
     this.validateSpec(spec);
     return this.withLock(spec.dotId, async () => {
-      for (const [label, path] of [
-        ["golden image", spec.goldenImage],
-        ["runtime ISO", spec.runtimeImage],
-      ] as const) {
-        if (!(await exists(path))) throw new VmManagerError(`${label} ${path} does not exist: build it with "invisible-dots image build" first`);
-      }
+      await this.assertImages(spec);
       const current = await this.probe(spec.dotId);
       if (current.state !== "STOPPED") {
         throw new VmStateError(spec.dotId, `the VM is ${current.state}; stop it before creating its disk and seed again`);
@@ -450,26 +421,6 @@ export class VmManager {
       this.logger.info("vm created", { dotId: spec.dotId, diskCreated, instanceId });
       return { vmDir: dir, diskPath, seedPath: this.paths.seedPath(spec.dotId), diskCreated, instanceId };
     });
-  }
-
-  /** The pid file: undefined when there is none, "unreadable" when it is not one this code wrote. */
-  private async readProcessFile(dotId: string): Promise<ProcessFile | "unreadable" | undefined> {
-    let text: string;
-    try {
-      text = await readFile(this.paths.processFilePath(dotId), "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-    return parseProcessFile(text) ?? "unreadable";
-  }
-
-  /** Written whole or not at all (a temporary file renamed over it), so a reader never sees half a pid file. */
-  private async writeProcessFile(dotId: string, record: ProcessFile): Promise<void> {
-    const path = this.paths.processFilePath(dotId);
-    const temporary = `${path}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    await replaceFile(temporary, path);
   }
 
   /** Forget a QEMU that is gone: its pid file, and its ChildProcess if this process held it. */
@@ -492,7 +443,7 @@ export class VmManager {
   }
 
   private async qemuRuns(dotId: string): Promise<boolean> {
-    const record = await this.readProcessFile(dotId);
+    const record = await readProcessFile(this.paths.processFilePath(dotId));
     return record !== undefined && record !== "unreadable" && this.runs(dotId, record);
   }
 
@@ -517,7 +468,7 @@ export class VmManager {
 
   /** Read a VM's state from its pid file and its process (section 3.4). */
   private async probe(dotId: string): Promise<Probe> {
-    const record = await this.readProcessFile(dotId);
+    const record = await readProcessFile(this.paths.processFilePath(dotId));
     if (record === undefined) return STOPPED;
     const file = this.paths.processFilePath(dotId);
     if (record === "unreadable") {
@@ -590,12 +541,7 @@ export class VmManager {
     await this.forget(dotId);
     const diskPath = this.paths.diskPath(dotId);
     if (!(await exists(diskPath))) throw new VmStateError(dotId, `${diskPath} does not exist; create the VM first`);
-    for (const [label, path] of [
-      ["golden image", spec.goldenImage],
-      ["runtime ISO", spec.runtimeImage],
-    ] as const) {
-      if (!(await exists(path))) throw new VmManagerError(`${label} ${path} does not exist: build it with "invisible-dots image build" first`);
-    }
+    await this.assertImages(spec);
     await this.writeSeed(spec);
     const qemu = await this.qemu();
     const accel = this.accelerator;
@@ -641,7 +587,7 @@ export class VmManager {
       const record: ProcessFile = { pid: child.pid, guest_port: guestPort, host_uptime_s: hostUptimeSeconds() };
       try {
         // Before anything can fail: from here on a restarted control plane finds this QEMU.
-        await this.writeProcessFile(dotId, record);
+        await writeProcessFile(this.paths.processFilePath(dotId), record);
       } catch (error) {
         await this.killOurs(dotId, record);
         await this.forget(dotId);

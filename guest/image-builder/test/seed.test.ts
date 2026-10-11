@@ -32,6 +32,7 @@ describe("pins.env", () => {
     expect(text).toContain("ENGINE_LOCK='engine-requirements.lock'\n");
     expect(text).toContain("ENGINE_BUILD='build-engine-env.sh'\n");
     expect(text).toContain("BROWSER_BUILD='build-browser-env.sh'\n");
+    expect(text).toContain(`APT_SNAPSHOT='${GUEST_PINS.apt_snapshot}'\n`);
     expect(text).toContain(`APT_PACKAGES='${GUEST_PINS.apt_packages.join(" ")}'\n`);
 
     const provision = (await readGuestAsset(defaultAssetRoot(), BUILDER_PROVISION)).toString("utf8");

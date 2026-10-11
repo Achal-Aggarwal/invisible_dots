@@ -282,21 +282,27 @@ QEMU on the same disk would corrupt it.
   `invisible-playwright-mcp`, transitive packages included, by
   `guest/image-builder/builder/mcp-requirements.lock`, every package at an
   exact version with the SHA-256 of its files. The builder installs it with
-  `uv pip install --require-hashes`, so nothing is resolved from the index at
-  build time; the lock is the one place the two top-level versions are
+  `uv pip install --require-hashes --only-binary :all:`, so nothing is
+  resolved from the index at build time and no package's build script runs;
+  the lock is the one place the two top-level versions are
   written, and it is part of the inputs digest, so a changed transitive
-  package is a new image. apt packages are not pinned by version; apt checks
-  their signatures.
+  package is a new image. The apt packages come from the Ubuntu archive as it
+  was at the moment `apt_snapshot` of `pins.json` names (snapshot.ubuntu.com,
+  `apt-get --snapshot`), so they and their dependencies are the same on any day
+  of the build; apt checks their signatures.
 - The **runtime disk** (`runtime-<version>.iso`, attached read-only to every VM
   and mounted at `/opt/invisible-dots`) carries our code: the engine's source,
   the `dot-agentd` binary and the systemd units. A new
   version of our code is a new ISO and a VM restart, not a new golden image and
   not a rebuilt overlay.
 
-Neither image is ever published by this project: the host builds both from
-public sources (`invisible-dots image build`, code in `guest/image-builder/`),
-with the same QEMU it runs Dots with and the same machine: the builder VM's
-command line is built from the vm-manager's `machineArgs()`, drive and device
+The host builds the runtime disk from this checkout, and the golden image from
+public sources (`invisible-dots image build`, code in `guest/image-builder/`)
+unless CI has published the golden image of exactly the same inputs: the
+release `golden-<inputs digest>` of `.github/workflows/golden-image.yml`,
+which `image build` downloads instead (`guest/image-builder/src/prebuilt.ts`;
+section 11.3). Either way the golden image is provisioned with the same QEMU a
+host runs Dots with and the same machine: the builder VM's command line is built from the vm-manager's `machineArgs()`, drive and device
 functions, the ones `qemuArgs()` uses, plus only what a builder needs, so a
 golden image is provisioned on the machine type, accelerator and CPU model a
 Dot boots it on. The seed and runtime ISO labels are each defined once, in
@@ -2947,7 +2953,7 @@ system and the apt packages the golden image installs on it (`apt_packages` of
 `guest/image-builder/pins.json`: Xvfb, XFCE and their libraries, over the Linux kernel,
 bash and the rest of Ubuntu's base), most of it GPL or LGPL software under its own
 licenses and source offers, downloaded from Ubuntu's archive on the machine that builds
-the image and published by no one here. Whoever copies a golden image to another
+the image, which is CI when the image is the published release of the paragraph above. Whoever copies a golden image to another
 machine takes those licenses with it (the paragraph above).
 
 ### 11.4 setup --all

@@ -33,7 +33,9 @@ install -m 0644 "$lock" "$dot_lock"
 
 as_dot mkdir -p "$bin_dir" "$(dirname "$env_dir")"
 as_dot uv venv --quiet --python /usr/bin/python3 "$env_dir"
-as_dot uv pip install --python "$env_dir/bin/python" --require-hashes -r "$dot_lock"
+# Wheels only, as for the engine: no build script of any package runs. --no-cache: the image does not need
+# uv's download cache in dot's home.
+as_dot uv pip install --no-cache --python "$env_dir/bin/python" --require-hashes --only-binary :all: -r "$dot_lock"
 [ -x "$env_dir/bin/invisible-playwright" ] || { echo "build-browser-env: no invisible-playwright in $env_dir/bin" >&2; exit 1; }
 [ -x "$env_dir/bin/invisible-playwright-mcp" ] || { echo "build-browser-env: no invisible-playwright-mcp in $env_dir/bin" >&2; exit 1; }
 as_dot ln -sfn "$env_dir/bin/invisible-playwright-mcp" "$bin_dir/invisible-playwright-mcp"

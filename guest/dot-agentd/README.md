@@ -60,11 +60,14 @@ an environment only by its owner.
 ## Build
 
 ```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
 ```
 
 The result is a static linux/amd64 binary with no dependencies outside the
-Go standard library. The unix-only pieces (socket umask, process groups,
+Go standard library, and the same bytes from the same source with the Go that
+`go.mod`'s `toolchain` names: no checkout path, commit or "modified" mark is
+stamped into it. This is the one build: `agentdBuildCommand()` of the image
+builder, CI and the smoke run it with these flags. The unix-only pieces (socket umask, process groups,
 `statfs`) sit behind build tags, so `go vet ./...` also works on other systems.
 
 ## Test

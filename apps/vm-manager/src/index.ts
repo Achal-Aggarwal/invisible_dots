@@ -79,6 +79,7 @@ export * from "./host.js";
 export * from "./logger.js";
 export * from "./ports.js";
 export * from "./powershell.js";
+export * from "./process-file.js";
 export * from "./qemu-args.js";
 export * from "./runner.js";
 export * from "./seed.js";

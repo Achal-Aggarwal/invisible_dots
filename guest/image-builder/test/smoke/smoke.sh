@@ -58,18 +58,39 @@ lay_out_guest
 # The engine needs no privilege: no sudoers rule, no config directory.
 check "the engine has no sudo rule (no /etc/sudoers.d/invisible-dots-engine, no sudo for dotengine)" "[ ! -e /etc/sudoers.d/invisible-dots-engine ] && ! su -s /bin/bash dotengine -c 'sudo -n true' >/dev/null 2>&1"
 check "no sudoers file names dotengine (the old engine's rule is gone with the config installer)" "! grep -rqs dotengine /etc/sudoers /etc/sudoers.d"
-# --- the VM proxy's firewall, as install.sh writes it, is a ruleset nft takes ---
+# --- the VM proxy, as install.sh sets it up: the runtime disk's vmproxy.py on a config that has a proxy ---
 # A rule nft refused stopped install.sh (set -e) before the tunnel started: the Dot went out directly with its proxy
-# set. install.sh's own generator runs here on a config that has a proxy, read from a copy of its path.
+# set. And a proxy that cannot be set up is reported for what it is: install.sh logs vmproxy.py's reason and lets
+# nothing out.
+VMPROXY="$TREE/guest/image-builder/runtime/vmproxy.py"
+vmproxy() { # proxy value, [PATH]: vmproxy.py on a config with that proxy; what it wrote is in $VMPROXY_OUT
+  printf '{"dotId":"dot_smoke","token":"t","proxy":"%s"}' "$1" > /tmp/vmproxy-config.json
+  VMPROXY_OUT=$(mktemp -d)
+  PATH="${2:-$PATH}" python3 "$VMPROXY" /tmp/vmproxy-config.json "$VMPROXY_OUT" 2> /tmp/vmproxy-stderr
+}
 vmproxy_rules_ok() {
-  local out
-  out=$(mktemp -d)
-  printf '{"dotId":"dot_smoke","token":"t","proxy":"socks5://user:p%%40ss@10.0.2.2:1080"}' > /tmp/vmproxy-config.json
-  sed -n "/<<'PY'\$/,/^PY\$/p" "$TREE/guest/image-builder/runtime/install.sh" | sed '1d;$d' \
-    | sed 's#/etc/invisible-dots/config.json#/tmp/vmproxy-config.json#' > /tmp/vmproxy-gen.py
-  python3 /tmp/vmproxy-gen.py "$out" && [ -s "$out/allow.nft" ] && [ -s "$out/hev.yml" ] && nft -c -f "$out/allow.nft"
+  vmproxy 'socks5://user:p%40ss@10.0.2.2:1080' && [ -s "$VMPROXY_OUT/allow.nft" ] && [ -s "$VMPROXY_OUT/hev.yml" ] \
+    && [ -s "$VMPROXY_OUT/up.sh" ] && grep -q 'password: "p@ss"' "$VMPROXY_OUT/hev.yml" && nft -c -f "$VMPROXY_OUT/allow.nft"
 }
 check "the VM proxy's firewall that install.sh writes for a proxy is a ruleset nft accepts" "vmproxy_rules_ok"
+vmproxy_refuses() { # exit code, words of the reason, proxy value, [PATH]: that code, that reason, and nothing written
+  vmproxy "$3" "${4:-}"
+  local code=$?
+  if [ "$code" -eq "$1" ] && grep -q "$2" /tmp/vmproxy-stderr && [ -z "$(ls -A "$VMPROXY_OUT")" ]; then return 0; fi
+  echo "exit $code: $(cat /tmp/vmproxy-stderr)"
+  return 1
+}
+# An ip that shows a default route without a gateway, as a VPN's or a point-to-point link's would be.
+mkdir -p /tmp/vmproxy-noroute
+printf '#!/bin/sh\necho "default dev wg0 scope link"\n' > /tmp/vmproxy-noroute/ip
+chmod 0755 /tmp/vmproxy-noroute/ip
+NOROUTE_PATH="/tmp/vmproxy-noroute:$PATH"
+check "a proxy that is not socks5://host:port is reported as that (exit 3) and nothing is written" \
+  "vmproxy_refuses 3 'is not socks5://' 'http://10.0.2.2:1080' && vmproxy_refuses 3 'is not socks5://' 'socks5://10.0.2.2:99999'"
+check "a proxy whose host does not resolve is reported as that (exit 4), not as a bad value" \
+  "vmproxy_refuses 4 'does not resolve' 'socks5://proxy.invalid:1080'"
+check "a VM with no default route through a gateway is reported as that (exit 5), not as a bad value" \
+  "vmproxy_refuses 5 'no default IPv4 route through a gateway' 'socks5://10.0.2.2:1080' \"\$NOROUTE_PATH\""
 check "dotengine is in no group but its own and dot" "[ \"\$(id -nG dotengine | tr ' ' '\n' | sort | tr '\n' ' ')\" = 'dot dotengine ' ]"
 write_host_token
 check "the token file is dot-agentd's own (dotagentd, 0600): neither the engine nor dot, the user of the model's commands, can read it" "[ \"\$(stat -c '%U:%G %a' /etc/invisible-dots/config.json)\" = 'dotagentd:dotagentd 600' ] && ! su -s /bin/bash dotengine -c 'cat /etc/invisible-dots/config.json' >/dev/null 2>&1 && ! su -s /bin/bash dot -c 'cat /etc/invisible-dots/config.json' >/dev/null 2>&1"

@@ -11,6 +11,7 @@
     "url": "https://github.com/heiher/hev-socks5-tunnel/releases/download/2.18.0/hev-socks5-tunnel-linux-x86_64",
     "sha256": "1903b23869cbd12b7b57045ca161c0f90314d9c4ef2835e7a9e4a3179bf7d925"
   },
+  "apt_snapshot": "20261010T000000Z",
   "apt_packages": [
     "xvfb",
     "xfce4-session",

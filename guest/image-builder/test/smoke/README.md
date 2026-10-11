@@ -129,7 +129,7 @@ engine) and at a launch (the egress address, for the timezone, and the library's
 
 ## Run it
 
-Only docker is needed, with the images `golang:1.26` and `ubuntu:24.04` (pulled when
+Only docker is needed, with the images `golang:1.26.8` and `ubuntu:24.04` (pulled when
 absent; the container downloads the pinned `uv` and the locked wheels).
 
 ```sh
@@ -157,7 +157,7 @@ removes the volume and the container on exit.
 
 | file | what it is |
 |---|---|
-| `run.sh` | the entry: runs dot-agentd's `privileged` Go tests as root in `golang:1.26` (they run work as another user; a skipped one fails the run), builds `dot-agentd` there, starts `ubuntu:24.04` with the tree, checks the exit status and the summary line; `--suite browser` runs the browser smoke |
+| `run.sh` | the entry: runs dot-agentd's `privileged` Go tests as root in `golang:1.26.8` (they run work as another user; a skipped one fails the run), builds `dot-agentd` there, starts `ubuntu:24.04` with the tree, checks the exit status and the summary line; `--suite browser` runs the browser smoke |
 | `prepare-engine.sh` | in the container: the golden image's users, `uv`, the engine's environment, the staged engine source (and for the browser suite the apt packages and the browser); then it runs the suite's checks |
 | `lib.sh` | what both suites share: the guest laid out as `install.sh` lays it out, `dot-agentd` and the engine started and restarted, the key and config push, the event stream and the helpers that read it |
 | `smoke.sh` | the engine smoke's checks; prints `PASS:` or `FAIL:` per check and the summary line |

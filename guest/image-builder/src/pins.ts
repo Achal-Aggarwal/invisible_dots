@@ -38,6 +38,11 @@ export interface GuestPins {
   uv: PinnedDownload;
   /** hev-socks5-tunnel, the static binary the guest routes the whole VM through when the Dot has a VM proxy. */
   tunnel: PinnedDownload;
+  /**
+   * The moment of the Ubuntu archive the packages come from (snapshot.ubuntu.com, `YYYYMMDDTHHMMSSZ`): apt resolves
+   * apt_packages and their dependencies as the archive was then, so the same pins give the same packages on any day.
+   */
+  apt_snapshot: string;
   apt_packages: string[];
 }
 
@@ -49,6 +54,8 @@ const SHA256 = /^[0-9a-f]{64}$/;
  */
 const PLAIN_WORD = /^[A-Za-z0-9][A-Za-z0-9.+_-]*$/;
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** A time of snapshot.ubuntu.com, as `apt-get --snapshot` takes it. */
+const APT_SNAPSHOT = /^\d{8}T\d{6}Z$/;
 
 function field(object: Record<string, unknown>, key: string, where: string): string {
   const value = object[key];
@@ -119,9 +126,12 @@ export function parseGuestPins(value: unknown): GuestPins {
   if ("python_packages" in o) throw new Error(`${where}: python_packages moved to builder/mcp-requirements.lock, which pins them with their hashes`);
   const apt = o.apt_packages;
   if (!Array.isArray(apt) || apt.length === 0) throw new Error(`${where}: apt_packages must be a non-empty array`);
+  const snapshot = field(o, "apt_snapshot", where);
+  if (!APT_SNAPSHOT.test(snapshot)) throw new Error(`${where}: apt_snapshot "${snapshot}" is not a snapshot time like 20261010T000000Z`);
   return {
     uv: parseDownload(o.uv, `${where} uv`),
     tunnel: parseDownload(o.tunnel, `${where} tunnel`),
+    apt_snapshot: snapshot,
     apt_packages: apt.map((name, i) => plainWord(typeof name === "string" ? name : "", `${where} apt_packages[${i}]`)),
   };
 }

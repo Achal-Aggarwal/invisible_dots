@@ -8,7 +8,7 @@ import { fileBytes, listFiles, parseIso } from "../../../packages/iso/test/iso-r
 import { defaultAssetRoot, GUEST_UNITS } from "../src/assets.js";
 import { readManifest, verifyImage, type RuntimeManifest } from "../src/manifest.js";
 import { RUNTIME_ISO_LABEL } from "@invisible-dots/vm-manager";
-import { agentdBuildCommand, assertLinuxAmd64Elf, buildRuntimeIso, defaultRuntimeInputs, runtimeFiles, type RuntimeInputs } from "../src/runtime.js";
+import { AGENTD_BUILD_SHELL, agentdBuildCommand, assertLinuxAmd64Elf, buildRuntimeIso, defaultRuntimeInputs, runtimeFiles, type RuntimeInputs } from "../src/runtime.js";
 import { sha256 } from "./http-fixture.js";
 
 /** The first bytes of an ELF executable for `machine` (0x3e is x86-64, 0xb7 arm64). */
@@ -73,10 +73,25 @@ describe("agentdBuildCommand", () => {
       join("repo", "root", "guest", "dot-agentd"),
       "build",
       "-trimpath",
+      "-buildvcs=false",
+      "-ldflags=-s -w",
       "-o",
       defaultRuntimeInputs(join("repo", "root")).agentdBinary,
       "./cmd/dot-agentd",
     ]);
+  });
+
+  it("builds into another file when asked, with the same flags", () => {
+    const build = agentdBuildCommand(join("repo", "root"), join("elsewhere", "dot-agentd"));
+    expect(build.args).toEqual([...agentdBuildCommand(join("repo", "root")).args.slice(0, -3), "-o", join("elsewhere", "dot-agentd"), "./cmd/dot-agentd"]);
+  });
+
+  it("is the build the shell line quotes: its environment, then go build with its flags, run in guest/dot-agentd", () => {
+    const build = agentdBuildCommand(join("repo", "root"), "bin/dot-agentd");
+    const env = Object.entries(build.env).map(([name, value]) => `${name}=${value}`);
+    // The shell line's one quoted word, -ldflags="-s -w", is the single argument -ldflags=-s -w.
+    const args = build.args.slice(2).map((arg) => (arg.includes(" ") ? arg.replace(/=(.*)$/, '="$1"') : arg));
+    expect(AGENTD_BUILD_SHELL).toBe([...env, "go", ...args].join(" "));
   });
 });
 
@@ -108,6 +123,7 @@ describe("buildRuntimeIso", () => {
         "engine/nanobot/templates/agent/tool_contract.md",
         "engine/skills/web-forms/SKILL.md",
         "install.sh",
+        "vmproxy.py",
         ...GUEST_UNITS.map((unit) => `units/${unit}`),
       ].sort(),
     );
@@ -115,6 +131,7 @@ describe("buildRuntimeIso", () => {
     expect(read("VERSION").toString()).toBe(`${result.version}\n`);
     expect(read("bin/dot-agentd")).toEqual(elf(0x3e));
     expect(read("install.sh")).toEqual(await readFile(join(defaultAssetRoot(), "runtime", "install.sh")));
+    expect(read("vmproxy.py")).toEqual(await readFile(join(defaultAssetRoot(), "runtime", "vmproxy.py")));
     expect(read("bin/dot-desktop")).toEqual(await readFile(join(defaultAssetRoot(), "runtime", "dot-desktop.sh")));
     expect(read("units/dot-agentd.service")).toEqual(await readFile(join(defaultAssetRoot(), "units", "dot-agentd.service")));
     // The engine's source as it is.

@@ -2,8 +2,10 @@
 
 `@invisible-dots/image-builder` builds the two guest images of architecture
 section 3.3 on the host, with the same code on Linux and Windows. It is what
-`invisible-dots image build` runs. Neither image is ever published: every host
-builds its own from public sources.
+`invisible-dots image build` runs. Every host builds its runtime ISO from its
+checkout; the golden image it downloads when CI published the one of exactly
+its inputs (the release `golden-<inputs digest>`, `src/prebuilt.ts`), and
+builds it from public sources otherwise.
 
 Both images land in `INVISIBLE_DOTS_HOME/images`, each with a manifest next to
 it (`golden-<v>.json`, `runtime-<v>.json`) that records what went in and the
@@ -33,13 +35,14 @@ image's SHA-256; `invisible-dots doctor` checks an image against it with
    same machine, CPU model and devices as a Dot (its command line is built
    from the vm-manager's `machineArgs()`). `provision.sh` installs the
    apt packages (Xvfb, a minimal XFCE, the browser's libraries, ImageMagick
-   for dot-agentd's screenshots), uv, then removes the cloud image's services a
-   Dot never uses (snapd, unattended-upgrades, apport, the LXD stubs, Ubuntu Pro,
+   for dot-agentd's screenshots) from the Ubuntu archive as it was at
+   `pins.json`'s `apt_snapshot` (`apt-get --snapshot`), uv, then removes the
+   cloud image's services a Dot never uses (snapd, unattended-upgrades, apport, the LXD stubs, Ubuntu Pro,
    the release upgrader, the SSH server, pollinate, which would tell Canonical of
    every new Dot), then builds the Dot's browser with
    `build-browser-env.sh <lock> ~dot/.local/share/invisible-dots/mcp`, as user
    `dot`: a virtual environment filled with
-   `uv pip install --require-hashes -r mcp-requirements.lock`, its
+   `uv pip install --require-hashes --only-binary :all: -r mcp-requirements.lock`, its
    `invisible-playwright-mcp` linked into `~/.local/bin`, and
    `invisible-playwright fetch` run from that environment, so the cached browser
    engine is the one the MCP server expects (the library keeps its own GeoIP
@@ -101,11 +104,13 @@ named in the error.
 | on the ISO | from |
 |---|---|
 | `install.sh` | `runtime/install.sh` |
+| `vmproxy.py` | `runtime/vmproxy.py`, which `install.sh` runs to set up the Dot's VM proxy |
 | `VERSION` | the version |
-| `bin/dot-agentd` | `guest/dot-agentd/bin/` (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/dot-agentd ./cmd/dot-agentd`), refused unless it is a linux/amd64 ELF |
+| `bin/dot-agentd` | `guest/dot-agentd/bin/` (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd`), refused unless it is a linux/amd64 ELF |
 | `bin/dot-desktop` | `runtime/dot-desktop.sh` |
-| `engine/nanobot/...` | `invisible_engine_dots/nanobot/`: every `*.py` and the `*.md` under `templates/` |
-| `engine/requirements.lock` | `builder/engine-requirements.lock`, byte for byte: the engine refuses to start when it differs from the venv's copy |
+| `bin/dot-install` | `runtime/dot-install.sh`, the one command `dot` may run as root |
+| `engine/nanobot/...` | `invisible_engine_dots/nanobot/`: every `*.py`, the `*.json` data and the `*.md` under `templates/` |
+| `engine/skills/<name>/SKILL.md` | `invisible_engine_dots/skills/`, the built-in skills |
 | `engine/LICENSE`, `engine/UPSTREAM.md` | `invisible_engine_dots/` |
 | `units/*.service` | `units/` |
 

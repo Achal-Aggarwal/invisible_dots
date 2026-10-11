@@ -3,7 +3,7 @@
  * one function that builds it, on every host; only the accelerator differs,
  * and it arrives here as a value from host.ts.
  */
-import { GUEST_PORT, vmName } from "@invisible-dots/shared";
+import { CONFIG_BOUNDS, GUEST_PORT, parseSizeMiB, vmName } from "@invisible-dots/shared";
 import { VmManagerError } from "./errors.js";
 import type { Accelerator } from "./host.js";
 
@@ -58,6 +58,21 @@ function integerInRange(label: string, value: number, min: number, max: number):
 }
 
 /**
+ * The cpus and memory every VM of this project may have, Dots and the image builder's VM alike: the range a Dot's
+ * config allows (CONFIG_BOUNDS of packages/shared, which owns it), in the units QEMU takes.
+ */
+export const VM_RESOURCE_BOUNDS = {
+  cpus: { min: CONFIG_BOUNDS.cpu.min, max: CONFIG_BOUNDS.cpu.max },
+  memoryMiB: { min: parseSizeMiB(CONFIG_BOUNDS.memory.min), max: parseSizeMiB(CONFIG_BOUNDS.memory.max) },
+} as const;
+
+/** Refuses cpus or memory outside VM_RESOURCE_BOUNDS, naming the value. */
+export function checkVmResources(spec: { cpus: number; memoryMiB: number }): void {
+  integerInRange("cpus", spec.cpus, VM_RESOURCE_BOUNDS.cpus.min, VM_RESOURCE_BOUNDS.cpus.max);
+  integerInRange("memoryMiB", spec.memoryMiB, VM_RESOURCE_BOUNDS.memoryMiB.min, VM_RESOURCE_BOUNDS.memoryMiB.max);
+}
+
+/**
  * The CPU model of every VM of this project (section 3.4): the host's own
  * CPU, without the virtualization extensions. A Dot never runs a hypervisor,
  * and under WHPX a guest that sees VMX stops: measured with QEMU 11.1 on
@@ -79,6 +94,7 @@ export const CPU_MODEL = "host,-vmx,-svm";
  * changes both.
  */
 export function machineArgs(spec: { accelerator: Accelerator; cpus: number; memoryMiB: number }): string[] {
+  checkVmResources(spec);
   return [
     "-machine",
     "q35",
@@ -87,9 +103,9 @@ export function machineArgs(spec: { accelerator: Accelerator; cpus: number; memo
     "-cpu",
     CPU_MODEL,
     "-smp",
-    String(integerInRange("cpus", spec.cpus, 1, 16)),
+    String(spec.cpus),
     "-m",
-    String(integerInRange("memoryMiB", spec.memoryMiB, 256, 64 * 1024)),
+    String(spec.memoryMiB),
   ];
 }
 
