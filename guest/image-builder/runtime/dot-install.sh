@@ -14,8 +14,13 @@ usage="usage: sudo dot-install <package>..."
 [ "$(id -u)" -eq 0 ] || { echo "dot-install: run it with sudo ($usage)" >&2; exit 2; }
 [ $# -ge 1 ] || { echo "$usage" >&2; exit 2; }
 for name in "$@"; do
-  # A Debian package name: lower case letters, digits, "+", "." and "-", starting with a letter or a digit.
-  [[ "$name" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || { echo "dot-install: \"$name\" is not a package name ($usage)" >&2; exit 2; }
+  # A Debian package name (policy 5.6.1): lower case letters, digits, "+", "." and "-", at least two characters,
+  # starting with a letter or a digit; that leaves out every option, version (=), release (/) and architecture (:).
+  # And not ending in "-": `apt-get install` reads a trailing "-" as "remove this package" when no package has the
+  # whole word as its name (apt-get(8)), so `foo-` would remove foo as root; no package of the archive ends in "-".
+  # A trailing "+" stays: it is apt's "install" mark, so `foo+` installs foo, and a name that ends in it (g++,
+  # ncbi-blast+) is matched whole first, so nothing but an install can come of it.
+  [[ "$name" =~ ^[a-z0-9][a-z0-9+.-]*[a-z0-9+.]$ ]] || { echo "dot-install: \"$name\" is not a package name ($usage)" >&2; exit 2; }
 done
 
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a

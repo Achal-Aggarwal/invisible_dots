@@ -79,7 +79,7 @@ const ALLOWED: Record<string, { owner: string; lines: string[] }> = {
   "guest/image-builder/src/runtime.ts": {
     owner:
       "agentdBuildCommand(): the guest's platform, the same on both hosts (not a branch): dot-agentd is built for linux/amd64 wherever the host runs",
-    lines: ['env: { CGO_ENABLED: "0", GOOS: "linux", GOARCH: "amd64" },'],
+    lines: ['const AGENTD_BUILD_ENV = { CGO_ENABLED: "0", GOOS: "linux", GOARCH: "amd64" } as const;'],
   },
   "packages/shared/src/files.ts": {
     owner: "permissionBitsEnforced() and restrictToOwner(): a private file is chmod 0600 on Linux and an owner-only ACL on Windows",

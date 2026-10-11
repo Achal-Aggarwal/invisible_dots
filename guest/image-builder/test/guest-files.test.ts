@@ -1,10 +1,10 @@
 // Checks of the files that run inside the guest. A mistake in them shows up
 // only inside a booted VM, minutes into a build or on every Dot's boot, so
 // the cheap ones are caught here.
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { GUEST_PATHS } from "@invisible-dots/shared";
 import { describe, expect, it } from "vitest";
 import { BUILDER_PYTHON_LOCK, defaultAssetRoot, GUEST_ASSETS, GUEST_UNITS, unitAsset } from "../src/assets.js";
@@ -115,6 +115,62 @@ describe("the sudo grants (architecture section 4.1)", () => {
   });
 });
 
+/**
+ * dot-install as sudo runs it, with `id` answering root and `apt-get` a stand-in that records its arguments: what
+ * reaches apt, or that nothing does.
+ */
+describe.skipIf(!bashUsable)("dot-install, the one command dot may run as root", () => {
+  function dotInstall(...names: string[]): { status: number; stderr: string; apt: string[] } {
+    const stubs = mkdtempSync(join(tmpdir(), "idots-dot-install-"));
+    try {
+      const calls = join(stubs, "apt-calls");
+      writeFileSync(join(stubs, "id"), "#!/bin/sh\necho 0\n", { mode: 0o755 });
+      writeFileSync(join(stubs, "apt-get"), `#!/bin/sh\necho "$*" >> '${calls.replace(/\\/g, "/")}'\n`, { mode: 0o755 });
+      // Windows spells the variable Path, and an environment holding both spellings is ambiguous.
+      const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+      const run = spawnSync("bash", [join(root, "runtime", "dot-install.sh"), ...names], {
+        env: { ...process.env, [pathKey]: `${stubs}${delimiter}${process.env[pathKey] ?? ""}` },
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+      const apt = existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : [];
+      return { status: run.status ?? -1, stderr: run.stderr, apt };
+    } finally {
+      rmSync(stubs, { recursive: true, force: true });
+    }
+  }
+  const lock = "-o DPkg::Lock::Timeout=300";
+
+  it("installs package names, those that end in + included", () => {
+    expect(dotInstall("nodejs", "libgtk-3-0t64", "python3.12", "g++", "ncbi-blast+")).toEqual({
+      status: 0,
+      stderr: "",
+      apt: [`${lock} update -qq`, `${lock} install -y nodejs libgtk-3-0t64 python3.12 g++ ncbi-blast+`],
+    });
+  });
+
+  it("passes a trailing + on, which apt reads as install", () => {
+    expect(dotInstall("foo+").apt).toEqual([`${lock} update -qq`, `${lock} install -y foo+`]);
+  });
+
+  it.each([
+    ["a trailing -, which apt reads as remove", "coreutils-"],
+    ["an option", "-o"],
+    ["a long option", "--allow-remove-essential"],
+    ["a version", "foo=1.0"],
+    ["a release", "foo/noble"],
+    ["an architecture", "foo:i386"],
+    ["upper case", "Foo"],
+    ["one character", "a"],
+    ["an empty word", ""],
+  ])("refuses %s, and nothing reaches apt", (_what, name) => {
+    const run = dotInstall("nodejs", name);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain(`"${name}" is not a package name`);
+    expect(run.apt).toEqual([]);
+  });
+});
+
 describe("the Dot's browser", () => {
   const provision = text("builder/provision.sh");
   const build = text("builder/build-browser-env.sh");
@@ -123,7 +179,7 @@ describe("the Dot's browser", () => {
     expect(provision).toContain('bash "$payload/$BROWSER_BUILD" "$payload/$PYTHON_LOCK" "$mcp_env"');
     expect(provision).toContain("mcp_env=/home/dot/.local/share/invisible-dots/mcp\n");
     expect(build).toContain('as_dot uv venv --quiet --python /usr/bin/python3 "$env_dir"');
-    expect(build).toContain('as_dot uv pip install --python "$env_dir/bin/python" --require-hashes -r "$dot_lock"');
+    expect(build).toContain('as_dot uv pip install --no-cache --python "$env_dir/bin/python" --require-hashes --only-binary :all: -r "$dot_lock"');
     expect(build).not.toMatch(/uv tool install/);
     expect(build).toContain('as_dot ln -sfn "$env_dir/bin/invisible-playwright-mcp" "$bin_dir/invisible-playwright-mcp"');
     expect(build).toContain('as_dot "$env_dir/bin/invisible-playwright" fetch');

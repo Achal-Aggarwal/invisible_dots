@@ -4,6 +4,7 @@
  * /opt/invisible-dots:
  *
  *   /install.sh                  the hook each Dot's seed runs on every boot
+ *   /vmproxy.py                  install.sh's setup of the Dot's VM proxy (tunnel, routes, firewall)
  *   /VERSION                     this runtime's version
  *   /bin/dot-agentd              the computer daemon (linux/amd64)
  *   /bin/dot-desktop             ExecStart of dot-desktop.service
@@ -22,11 +23,11 @@
  * permission bits having to survive a Windows host.
  */
 import { createHash } from "node:crypto";
-import { chmod, mkdir, open, readdir, rm, stat } from "node:fs/promises";
+import { open, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeIso, type IsoEntry } from "@invisible-dots/iso";
-import { hostPaths, replaceFile, type HostPaths } from "@invisible-dots/shared";
+import { hostPaths, type HostPaths } from "@invisible-dots/shared";
 import { RUNTIME_ISO_LABEL } from "@invisible-dots/vm-manager";
 import {
   defaultAssetRoot,
@@ -35,12 +36,14 @@ import {
   RUNTIME_DESKTOP,
   RUNTIME_DOT_INSTALL,
   RUNTIME_INSTALL,
+  RUNTIME_VMPROXY,
   unitAsset,
 } from "./assets.js";
 import { sha256File } from "./download.js";
 import { acquireLock } from "./lock.js";
-import { manifestPathFor, writeManifest, type RuntimeFile, type RuntimeManifest } from "./manifest.js";
-import { checkVersion, findImageByDigest, inputsDigest, versionFor } from "./versions.js";
+import type { RuntimeFile, RuntimeManifest } from "./manifest.js";
+import { publishImage, resolveImageVersion } from "./publish.js";
+import { inputsDigest } from "./versions.js";
 
 export interface RuntimeInputs {
   /** guest/dot-agentd/bin/dot-agentd, built for linux/amd64 */
@@ -65,15 +68,28 @@ export interface BuildCommand {
 }
 
 /**
- * The command that builds `defaultRuntimeInputs(repoRoot).agentdBinary`: a static linux/amd64 executable whatever
- * the host is (`assertLinuxAmd64Elf` refuses anything else), with the paths trimmed so the same source gives the same
- * bytes from any checkout. `go -C` enters the module itself, so the caller's working directory does not matter.
+ * The one build of dot-agentd, the same wherever it runs (this function, CI, the smoke, the READMEs): a static
+ * linux/amd64 executable whatever the host is (`assertLinuxAmd64Elf` refuses anything else), with the same bytes from
+ * the same source and toolchain (go.mod's `toolchain`) in any checkout: `-trimpath` leaves out the checkout's path,
+ * `-buildvcs=false` the commit and whether the tree had changes, which Go otherwise stamps into a binary built in a
+ * git checkout, so that every commit, and every edit of any file, would make another runtime disk; `-s -w` leave out
+ * the symbol table and the debug information.
  */
-export function agentdBuildCommand(repoRoot: string): BuildCommand {
+const AGENTD_BUILD_ENV = { CGO_ENABLED: "0", GOOS: "linux", GOARCH: "amd64" } as const;
+const AGENTD_BUILD_FLAGS = ["-trimpath", "-buildvcs=false", "-ldflags=-s -w"] as const;
+
+/** The same build as a shell line, run in guest/dot-agentd: what the documentation and the workflows quote. */
+export const AGENTD_BUILD_SHELL = 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd';
+
+/**
+ * The command that builds dot-agentd into `output`, by default `defaultRuntimeInputs(repoRoot).agentdBinary`, the
+ * file the runtime disk takes. `go -C` enters the module itself, so the caller's working directory does not matter.
+ */
+export function agentdBuildCommand(repoRoot: string, output: string = defaultRuntimeInputs(repoRoot).agentdBinary): BuildCommand {
   return {
     command: "go",
-    args: ["-C", join(repoRoot, "guest", "dot-agentd"), "build", "-trimpath", "-o", defaultRuntimeInputs(repoRoot).agentdBinary, "./cmd/dot-agentd"],
-    env: { CGO_ENABLED: "0", GOOS: "linux", GOARCH: "amd64" },
+    args: ["-C", join(repoRoot, "guest", "dot-agentd"), "build", ...AGENTD_BUILD_FLAGS, "-o", output, "./cmd/dot-agentd"],
+    env: { ...AGENTD_BUILD_ENV },
   };
 }
 
@@ -112,8 +128,7 @@ export async function assertLinuxAmd64Elf(path: string): Promise<void> {
   const machine = header.readUInt16LE(18);
   if (!elf || !is64 || !little || machine !== 0x3e) {
     throw new Error(
-      `${path} is not a linux/amd64 executable; build it with ` +
-        `"go build" and GOOS=linux GOARCH=amd64 CGO_ENABLED=0 in guest/dot-agentd`,
+      `${path} is not a linux/amd64 executable; build it in guest/dot-agentd with ${AGENTD_BUILD_SHELL}`,
     );
   }
 }
@@ -192,14 +207,14 @@ export async function runtimeFiles(inputs: RuntimeInputs, assetRoot: string = de
   const agentd = await stat(inputs.agentdBinary).catch(() => undefined);
   if (!agentd?.isFile()) {
     throw new Error(
-      `dot-agentd binary ${inputs.agentdBinary} not found: build it first ` +
-        `(in guest/dot-agentd: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/dot-agentd ./cmd/dot-agentd)`,
+      `dot-agentd binary ${inputs.agentdBinary} not found: build it first (in guest/dot-agentd: ${AGENTD_BUILD_SHELL})`,
     );
   }
   await assertLinuxAmd64Elf(inputs.agentdBinary);
 
   const files = [
     stageBytes("install.sh", await readGuestAsset(assetRoot, RUNTIME_INSTALL)),
+    stageBytes("vmproxy.py", await readGuestAsset(assetRoot, RUNTIME_VMPROXY)),
     stageBytes("bin/dot-desktop", await readGuestAsset(assetRoot, RUNTIME_DESKTOP)),
     stageBytes("bin/dot-install", await readGuestAsset(assetRoot, RUNTIME_DOT_INSTALL)),
     await stageFile("bin/dot-agentd", inputs.agentdBinary),
@@ -216,28 +231,17 @@ export async function buildRuntimeIso(options: RuntimeBuildOptions = {}): Promis
   const files = await runtimeFiles(options.inputs ?? defaultRuntimeInputs(), options.assetRoot ?? defaultAssetRoot());
   const digest = inputsDigest(files.flatMap((file) => [file.path, file.sha256]));
 
-  await mkdir(paths.imagesDir, { recursive: true });
-  let version: string;
-  if (options.version === undefined) {
-    const existing = await findImageByDigest(paths.imagesDir, "runtime", digest);
-    if (existing) {
-      log(`${basename(existing.path)} already holds this code; nothing to do`);
-      return { version: existing.version, iso: existing.path, manifest: manifestPathFor(existing.path), created: false };
-    }
-    version = versionFor(now(), digest);
-  } else {
-    version = checkVersion(options.version);
-  }
-
-  const iso = paths.runtimeIsoPath(version);
-  const manifestPath = manifestPathFor(iso);
-  if ((await stat(iso).catch(() => undefined)) !== undefined) {
-    if ((await stat(manifestPath).catch(() => undefined)) !== undefined) {
-      log(`${basename(iso)} already exists; nothing to do`);
-      return { version, iso, manifest: manifestPath, created: false };
-    }
-    throw new Error(`${iso} exists without its manifest ${manifestPath}: it is not one this builder finished; remove it by hand`);
-  }
+  const target = await resolveImageVersion({
+    kind: "runtime",
+    imagesDir: paths.imagesDir,
+    digest,
+    version: options.version,
+    now,
+    imagePath: (v) => paths.runtimeIsoPath(v),
+    log,
+  });
+  const { version, image: iso, manifest: manifestPath } = target;
+  if (target.existing) return { version, iso, manifest: manifestPath, created: false };
 
   const lock = await acquireLock(join(paths.imagesDir, ".runtime-build.lock"), "runtime ISO build");
   try {
@@ -263,10 +267,7 @@ export async function buildRuntimeIso(options: RuntimeBuildOptions = {}): Promis
         content_digest: digest,
         files: all.map((file): RuntimeFile => ({ path: file.path, sha256: file.sha256, size_bytes: file.size })),
       };
-      // Manifest first, then the image appears under the name the control plane looks for.
-      await writeManifest(manifestPath, manifest);
-      await replaceFile(partial, iso);
-      await chmod(iso, 0o444);
+      await publishImage(partial, iso, manifestPath, manifest);
       log(`done: ${iso} (sha256 ${manifest.sha256})`);
       return { version, iso, manifest: manifestPath, created: true };
     } catch (error) {

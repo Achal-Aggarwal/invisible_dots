@@ -58,6 +58,7 @@ beforeEach(async () => {
   pins = {
     uv: { version: "0.12.22", url: http.url(`/uv/${UV_FILE}`), shasums_url: http.url(`/uv/${UV_FILE}.sha256`), shasums_entry: UV_FILE, sha256: sha256(UV) },
     tunnel: { version: "2.18.0", url: http.url(`/tunnel/${TUNNEL_FILE}`), sha256: sha256(TUNNEL) },
+    apt_snapshot: "20261010T000000Z",
     apt_packages: ["xvfb", "imagemagick"],
   };
   logs = [];
@@ -133,6 +134,7 @@ describe("buildGoldenImage", () => {
         uv: { version: "0.12.22", sha256: sha256(UV) },
         "invisible-playwright-mcp": "0.71.1",
         "invisible-playwright": "0.32.0",
+        apt_snapshot: "20261010T000000Z",
         apt_packages: ["xvfb", "imagemagick"],
       },
       // The engine's lock, which the runtime disk's copy must equal.

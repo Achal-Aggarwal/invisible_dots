@@ -38,6 +38,8 @@ export interface GoldenManifest {
     "invisible-playwright": string;
     /** SHA-256 of builder/mcp-requirements.lock: the whole Python environment, transitive packages included. */
     "mcp-requirements.lock": string;
+    /** The moment of the Ubuntu archive apt_packages came from (pins.json). */
+    apt_snapshot: string;
     apt_packages: string[];
   };
   /** The engine's Python environment (builder/engine-requirements.lock): the lock the runtime disk's copy must equal. */

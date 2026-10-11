@@ -30,13 +30,18 @@ trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-step "installing packages: $APT_PACKAGES"
+step "installing packages from the Ubuntu archive as of $APT_SNAPSHOT: $APT_PACKAGES"
 # The cloud image may still be running its own apt jobs at first boot: wait for the lock.
 apt_wait=(-o DPkg::Lock::Timeout=600)
-apt-get "${apt_wait[@]}" update
+# The packages and every dependency come from the archive as it was at the pinned moment (snapshot.ubuntu.com,
+# which apt reaches for the archive this image is configured with), not as it is on the day of the build: the same
+# pins make the same image. --error-on=any: a list that cannot be fetched fails the build instead of leaving apt
+# with whatever lists the cloud image had.
+apt_snapshot=(--snapshot "$APT_SNAPSHOT")
+apt-get "${apt_wait[@]}" "${apt_snapshot[@]}" --error-on=any update
 # shellcheck disable=SC2086
 # unsafe-io: no fsync per package, the builder VM is thrown away if the build fails anyway.
-apt-get "${apt_wait[@]}" -o Dpkg::Options::=--force-unsafe-io install -y --no-install-recommends $APT_PACKAGES
+apt-get "${apt_wait[@]}" "${apt_snapshot[@]}" -o Dpkg::Options::=--force-unsafe-io install -y --no-install-recommends $APT_PACKAGES
 
 step "removing what a Dot never uses"
 # Services of the cloud image that would run in every Dot for nothing: snaps, automatic upgrades (apt in the

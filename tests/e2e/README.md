@@ -106,7 +106,7 @@ git clone https://github.com/feder-cr/invisible_dots && cd invisible_dots
 npm ci
 npm run build --workspace @invisible-dots/cli
 npm run build --workspace @invisible-dots/web        # skip with E2E_WEB=0
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go -C guest/dot-agentd build -trimpath -o bin/dot-agentd ./cmd/dot-agentd
+(cd guest/dot-agentd && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd)
 
 # The key goes in a file only you can read; the run never prints it.
 install -m 600 /dev/null ~/openrouter.key && $EDITOR ~/openrouter.key
@@ -146,8 +146,8 @@ device's group, as on a real host; no `--privileged`.
 ```bash
 # dot-agentd needs Go, which the host image deliberately lacks
 docker run --rm -v "$PWD/guest/dot-agentd:/src" -w /src \
-  -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 -e GOFLAGS=-buildvcs=false \
-  golang:1.26 go build -trimpath -o bin/dot-agentd ./cmd/dot-agentd
+  -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
+  golang:1.26.8 go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/dot-agentd ./cmd/dot-agentd
 
 # The container's user takes your uid and gid, so it can read ~/openrouter.key (mode 0600) as you do.
 docker build -t idots-linux-host --build-arg HOST_UID="$(id -u)" --build-arg HOST_GID="$(id -g)" tests/e2e/linux-host

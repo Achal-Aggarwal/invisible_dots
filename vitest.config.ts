@@ -16,7 +16,9 @@ export default defineConfig({
     // "@vitest-environment jsdom" line so that no other test pays for a DOM.
     // invisible_engine_dots/ holds the nanobot fork: Python, with its own pytest suite
     // (the engine job of the CI workflow); nothing of it runs here.
-    exclude: ["**/node_modules/**", "**/.next/**", "invisible_engine_dots/**"],
+    // A `*.linux.test.ts` drives a Linux program of the guest itself (dot-agentd, with its bash and its unix
+    // sockets): it is collected on Linux only, so on another host it is neither run nor counted as skipped.
+    exclude: ["**/node_modules/**", "**/.next/**", "invisible_engine_dots/**", ...(process.platform === "linux" ? [] : ["**/*.linux.test.ts"])],
     environment: "node",
     // Setup hooks boot an embedded PostgreSQL (PGlite, WebAssembly) and run
     // the migrations, or start servers and child processes. On a loaded

@@ -1,7 +1,7 @@
 /**
  * The files of this package that end up inside a guest: the builder's
- * cloud-init and provisioner, and the runtime ISO's install hook, desktop
- * script and systemd units. They are kept as plain files so they can be read,
+ * cloud-init and provisioner, and the runtime ISO's install hook, VM proxy
+ * setup, desktop script and systemd units. They are kept as plain files so they can be read,
  * diffed and checked with shell tools, and read from disk at build time.
  */
 import { readFile } from "node:fs/promises";
@@ -30,6 +30,8 @@ export const BUILDER_BROWSER_BUILD = "builder/build-browser-env.sh";
 export const RUNTIME_INSTALL = "runtime/install.sh";
 export const RUNTIME_DESKTOP = "runtime/dot-desktop.sh";
 export const RUNTIME_DOT_INSTALL = "runtime/dot-install.sh";
+/** Writes the VM proxy's tunnel settings, routes and firewall; install.sh runs it when the Dot has a proxy. */
+export const RUNTIME_VMPROXY = "runtime/vmproxy.py";
 /** The guest units, in the order install.sh enables them. */
 export const GUEST_UNITS = ["dot-desktop.service", "dot-agentd.service", "invisible-dots-agent.service"] as const;
 
@@ -38,7 +40,7 @@ export function unitAsset(name: (typeof GUEST_UNITS)[number]): string {
 }
 
 /** Every guest file, for checks that apply to all of them. */
-export const GUEST_ASSETS: readonly string[] = [BUILDER_USER_DATA, BUILDER_PROVISION, BUILDER_PYTHON_LOCK, BUILDER_ENGINE_LOCK, BUILDER_ENGINE_BUILD, BUILDER_BROWSER_BUILD, RUNTIME_INSTALL, RUNTIME_DESKTOP, RUNTIME_DOT_INSTALL, ...GUEST_UNITS.map(unitAsset)];
+export const GUEST_ASSETS: readonly string[] = [BUILDER_USER_DATA, BUILDER_PROVISION, BUILDER_PYTHON_LOCK, BUILDER_ENGINE_LOCK, BUILDER_ENGINE_BUILD, BUILDER_BROWSER_BUILD, RUNTIME_INSTALL, RUNTIME_DESKTOP, RUNTIME_DOT_INSTALL, RUNTIME_VMPROXY, ...GUEST_UNITS.map(unitAsset)];
 
 /**
  * Reads a guest file and refuses one a Windows checkout turned into CRLF:

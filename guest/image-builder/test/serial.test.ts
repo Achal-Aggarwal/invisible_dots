@@ -43,13 +43,31 @@ describe("installedComponents", () => {
 });
 
 describe("followSerialLog", () => {
-  it("reports progress lines as they are appended, including a file that appears late", async () => {
+  it("reports nothing and stops cleanly while the file does not exist", async () => {
+    const seen: string[] = [];
+    const follower = followSerialLog(join(dir, "serial.log"), (step) => seen.push(step), 10);
+    await follower.stop();
+    expect(seen).toEqual([]);
+    expect(follower.tail(1)).toEqual([]);
+  });
+
+  it("reports progress lines as they are appended, from a file that appears after it started", async () => {
     const path = join(dir, "serial.log");
     const seen: string[] = [];
-    const follower = followSerialLog(path, (step) => seen.push(step), 10);
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    let progressed = () => {};
+    const progress = () => new Promise<void>((resolve) => (progressed = resolve));
+    const follower = followSerialLog(
+      path,
+      (step) => {
+        seen.push(step);
+        progressed();
+      },
+      10,
+    );
+    const first = progress();
     await appendFile(path, "booting\r\nidots-build: installing packages\r\nidots-bu");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await first;
+    // The half line is held back until its end arrives.
     expect(seen).toEqual(["installing packages"]);
     await appendFile(path, "ild: installing Node 24\nIDOTS-BUILD-RESULT: ok");
     await follower.stop();

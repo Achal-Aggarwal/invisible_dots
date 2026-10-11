@@ -8,11 +8,11 @@ import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { writeIso } from "@invisible-dots/iso";
-import { hostPaths, replaceFile, type HostPaths } from "@invisible-dots/shared";
+import { hostPaths, type HostPaths } from "@invisible-dots/shared";
 import { BUILDER_BROWSER_BUILD, BUILDER_ENGINE_BUILD, BUILDER_ENGINE_LOCK, BUILDER_PROVISION, BUILDER_PYTHON_LOCK, BUILDER_USER_DATA, defaultAssetRoot, readGuestAsset } from "./assets.js";
 import { fetchVerified, sha256File, type Fetch, type FetchVerifiedOptions } from "./download.js";
 import { acquireLock, type Lock } from "./lock.js";
-import { manifestPathFor, writeManifest, type GoldenManifest } from "./manifest.js";
+import { manifestPathFor, type GoldenManifest } from "./manifest.js";
 import { BASE_IMAGE, downloadFileName, GUEST_PINS, type BaseImagePin, type GuestPins, type PinnedDownload } from "./pins.js";
 import { waitForExit, type ProcessRunner } from "./process.js";
 import { PREBUILT_RELEASES, pullPrebuiltGolden } from "./prebuilt.js";
@@ -21,7 +21,8 @@ import { builderQemuArgs, type Accelerator, type QemuPrograms } from "./qemu.js"
 import { SEED_VOLUME_ID } from "@invisible-dots/vm-manager";
 import { builderSeedEntries } from "./seed.js";
 import { buildVerdict, followSerialLog, installedComponents } from "./serial.js";
-import { checkVersion, findImageByDigest, inputsDigest, versionFor } from "./versions.js";
+import { inputsDigest } from "./versions.js";
+import { publishImage, resolveImageVersion } from "./publish.js";
 
 export const GOLDEN_DEFAULTS = {
   /** Each Dot's overlay is larger; cloud-init grows the filesystem when a Dot boots. */
@@ -112,28 +113,16 @@ export async function buildGoldenImage(options: GoldenBuildOptions): Promise<Gol
   // source is not: it travels on the runtime disk (section 3.3).
   const digest = inputsDigest([JSON.stringify(base), JSON.stringify(pins), userData, provision, pythonLock, diskSize, engineLock, engineBuild, browserBuild]);
 
-  await mkdir(paths.imagesDir, { recursive: true });
-  let version: string;
-  if (options.version === undefined) {
-    const existing = await findImageByDigest(paths.imagesDir, "golden", digest);
-    if (existing) {
-      log(`${basename(existing.path)} already holds these inputs; nothing to do`);
-      return { version: existing.version, image: existing.path, manifest: manifestPathFor(existing.path), created: false };
-    }
-    version = versionFor(now(), digest);
-  } else {
-    version = checkVersion(options.version);
-  }
-
-  const image = paths.goldenImagePath(version);
-  const manifest = manifestPathFor(image);
-  if (await exists(image)) {
-    if (await exists(manifest)) {
-      log(`${basename(image)} already exists; nothing to do`);
-      return { version, image, manifest, created: false };
-    }
-    throw new GoldenBuildError(`${image} exists without its manifest ${manifest}: it is not one this builder finished; remove it by hand`);
-  }
+  const { version, image, manifest, existing } = await resolveImageVersion({
+    kind: "golden",
+    imagesDir: paths.imagesDir,
+    digest,
+    version: options.version,
+    now,
+    imagePath: (v) => paths.goldenImagePath(v),
+    log,
+  });
+  if (existing) return { version, image, manifest, created: false };
 
   const lock = await acquireLock(join(paths.imagesDir, ".golden-build.lock"), "golden image build");
   try {
@@ -264,18 +253,14 @@ async function buildLocked(options: GoldenBuildOptions & Resolved, target: Targe
         "invisible-playwright-mcp": target.python.mcpVersion,
         "invisible-playwright": target.python.playwrightVersion,
         "mcp-requirements.lock": createHash("sha256").update(target.pythonLock).digest("hex"),
+        apt_snapshot: pins.apt_snapshot,
         apt_packages: [...pins.apt_packages],
       },
       engine: { lock_sha256: createHash("sha256").update(target.engineLock).digest("hex") },
       installed: installedComponents(consoleText),
       builder: { accelerator: options.accelerator },
     };
-    // The manifest goes first: the control plane picks images by file name,
-    // so the image must not appear before the record that describes it.
-    await writeManifest(target.manifest, manifest);
-    await replaceFile(partial, target.image);
-    // Immutable once a VM uses it (section 3.3); QEMU opens a backing file read-only anyway.
-    await chmod(target.image, 0o444);
+    await publishImage(partial, target.image, target.manifest, manifest);
     await rm(workDir, { recursive: true, force: true });
     log(`done: ${target.image} (sha256 ${sha256})`);
     return { version: target.version, image: target.image, manifest: target.manifest, created: true };
@@ -348,8 +333,4 @@ function duration(ms: number): string {
 
 function lastLines(text: string, count: number): string {
   return text.split(/\r?\n/).filter((line) => line.trim() !== "").slice(-count).join("\n");
-}
-
-async function exists(path: string): Promise<boolean> {
-  return (await stat(path).catch(() => undefined)) !== undefined;
 }

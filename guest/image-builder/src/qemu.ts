@@ -27,9 +27,8 @@ export interface BuilderVmSpec {
   serialLog: string;
 }
 
+/** The builder VM's command line; its cpus and memory are held to a Dot's bounds by `machineArgs()`. */
 export function builderQemuArgs(spec: BuilderVmSpec): string[] {
-  if (!Number.isInteger(spec.cpus) || spec.cpus < 1) throw new Error(`cpus must be a positive integer, got ${spec.cpus}`);
-  if (!Number.isInteger(spec.memoryMib) || spec.memoryMib < 1024) throw new Error(`memory must be at least 1024 MiB, got ${spec.memoryMib}`);
   return [
     "-name",
     "invisible-dots-image-builder",

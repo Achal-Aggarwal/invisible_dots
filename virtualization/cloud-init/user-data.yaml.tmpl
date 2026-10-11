@@ -56,7 +56,7 @@ write_files:
       mountpoint -q /opt/invisible-dots || mount /opt/invisible-dots
       exec /opt/invisible-dots/install.sh
 
-# The runtime ISO is the second CD-ROM drive (section 3.4). It is found by its
-# volume label, written by packages/iso, so the device name does not matter.
+# The runtime ISO is the third read-only virtio disk, after the seed (section 3.4). It is
+# found by its volume label, written by packages/iso, so the device name does not matter.
 mounts:
   - [ {{runtimeDevice}}, /opt/invisible-dots, iso9660, "ro,nofail,x-systemd.device-timeout=30s", "0", "0" ]
