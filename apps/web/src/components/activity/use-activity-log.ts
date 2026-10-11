@@ -1,9 +1,9 @@
 "use client";
 
+import { mergeEvents, readRecentEvents } from "@invisible-dots/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVITY_PAGE, typesFor } from "../../lib/activity";
 import { api } from "../../lib/api";
-import { mergeEvents, readRecentEvents } from "../../lib/event-log";
 import type { EventFamily } from "../../lib/events/view";
 import type { StoredEvent } from "../../lib/types";
 import { useLiveEvents } from "../events";

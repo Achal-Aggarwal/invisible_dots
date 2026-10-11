@@ -1,6 +1,6 @@
 import { MAX_EVENT_PAGE, type StoredEvent } from "@invisible-dots/shared/browser";
 import { describe, expect, it } from "vitest";
-import { mergeEvents, readEventLog, readEventRange, readRecentEvents } from "../src/lib/event-log";
+import { mergeEvents, readEventLog, readEventRange, readRecentEvents } from "../src/index.js";
 
 function log(count: number): StoredEvent[] {
   return Array.from({ length: count }, (_, i) => ({ id: i + 1, dot_id: "d1", type: i % 3 === 0 ? "tool.called" : "agent.state", data: {}, source: "guest", guest_seq: i, created_at: "2026-03-10T12:00:00Z" }) as StoredEvent);

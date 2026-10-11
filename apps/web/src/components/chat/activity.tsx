@@ -2,15 +2,18 @@
 
 import { ChevronRightIcon, HandIcon } from "lucide-react";
 import { useState } from "react";
-import { clusterSummary, groupActivity, type ActivityItem, type ApprovalStep, type ToolStep } from "../../lib/chat-thread";
-import { formatDate, formatMillis } from "../../lib/format";
+import { clusterSummary, groupActivity, type ActivityItem } from "../../lib/chat-thread";
+import { formatMillis } from "../../lib/format";
+import { APPROVAL_WORD, TOOL_OUTCOME, type ApprovalStep, type ToolStep } from "../../lib/steps";
+import type { Tone } from "../../lib/tone";
 import { cn } from "../../lib/utils";
 import { InlineApproval } from "../approvals/InlineApproval";
 import { FAMILY_ICON } from "../tool-family-icon";
 import { ActivityStep, type ActivityStepTone } from "./activity-step";
 import { TOOL_STATUS, ToolStatusWord } from "./tool-status";
 
-const STATE_TONE: Record<ToolStep["state"], ActivityStepTone> = { ok: "neutral", error: "error", denied: "warn", interrupted: "warn" };
+/** A step's marker in the tone of how the call ended. */
+const MARKER: Record<Tone, ActivityStepTone> = { neutral: "neutral", info: "active", ok: "success", warn: "warn", error: "error" };
 
 /** One tool call as a quiet line: what it did, what it acted on, and how it ended when that was not well. */
 export function ToolLine({ step }: { step: ToolStep }) {
@@ -19,7 +22,7 @@ export function ToolLine({ step }: { step: ToolStep }) {
   return (
     <ActivityStep
       icon={FAMILY_ICON[step.family]}
-      tone={STATE_TONE[step.state]}
+      tone={MARKER[TOOL_OUTCOME[step.state].tone]}
       title={full}
       label={
         <>
@@ -32,8 +35,6 @@ export function ToolLine({ step }: { step: ToolStep }) {
     />
   );
 }
-
-const APPROVAL_WORD: Record<Exclude<ApprovalStep["outcome"], "waiting">, string> = { approved: "Allowed", rejected: "Denied" };
 
 /**
  * An approval the Dot asked for in the conversation, in the place it was asked. While it waits it is the approval card,
@@ -58,6 +59,7 @@ export function ApprovalLine({ dotId, step }: { dotId: string; step: ApprovalSte
           {APPROVAL_WORD[step.outcome]}
           {approved && step.always ? " for good" : ""}: {step.label.toLowerCase()}
           {step.reason ? <span className="font-normal"> ({step.reason})</span> : null}
+          {step.note ? <span className="block text-xs font-normal">Note: {step.note}</span> : null}
         </span>
       }
     />

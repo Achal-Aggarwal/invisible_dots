@@ -2,7 +2,6 @@ import { CHANNEL_KINDS, CHANNEL_STATUSES, type ChannelKind, type ChannelPeerReco
 import { describe, expect, it } from "vitest";
 import {
   accountHref,
-  accountLabel,
   CHANNEL_LABELS,
   CHANNEL_NOTES,
   channelState,
@@ -48,14 +47,6 @@ describe("the chip of a channel", () => {
 });
 
 describe("the account of a channel", () => {
-  it("is a bot's @name and a number with its plus, and nothing before the channel reports one", () => {
-    expect(accountLabel("telegram", "dot_helper_bot")).toBe("@dot_helper_bot");
-    expect(accountLabel("whatsapp", "15550001111")).toBe("+15550001111");
-    expect(accountLabel("whatsapp", "+15550001111")).toBe("+15550001111");
-    expect(accountLabel("telegram", null)).toBeNull();
-    expect(accountLabel("whatsapp", "")).toBeNull();
-  });
-
   it("links a Telegram bot's page, and nothing for a number or for a name that is not a bot's", () => {
     expect(accountHref("telegram", "dot_helper_bot")).toBe("https://t.me/dot_helper_bot");
     expect(accountHref("telegram", "../evil")).toBeNull();

@@ -12,9 +12,25 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import QRCode from "qrcode";
-import { ApiError, type DotSummary, type InvisibleDotsClient, type TaskRecord } from "@invisible-dots/sdk";
-import { CHANNEL_KINDS, COMPUTER_STOPPED, DEFAULT_WEB_LISTEN, ENV, type ChannelKind, type ChannelRecord, type ComputerAnswer, type McpSecretsAnswer, type StoredEvent, type ToolListAnswer } from "@invisible-dots/shared";
+import { ApiError, readRecentEvents, type ApprovalRecord, type DotSummary, type InvisibleDotsClient, type TaskRecord } from "@invisible-dots/sdk";
+import {
+  accountLabel,
+  CHANNEL_KINDS,
+  COMPUTER_STOPPED,
+  DEFAULT_WEB_LISTEN,
+  ENV,
+  MAX_EVENT_PAGE,
+  permissionPhrase,
+  toolLabel,
+  type ChannelKind,
+  type ChannelRecord,
+  type ComputerAnswer,
+  type McpSecretsAnswer,
+  type StoredEvent,
+  type ToolListAnswer,
+} from "@invisible-dots/shared";
 import { STORE_OPENROUTER_KEY } from "@invisible-dots/vm-manager";
+import cliPackage from "../package.json" with { type: "json" };
 import { apiUrl, AuthSetupError, connectApi, DEFAULT_URL } from "./api-client.js";
 import { addTelegramChannel } from "./commands.js";
 import { EXIT } from "./exit.js";
@@ -22,7 +38,11 @@ import { EXIT } from "./exit.js";
 export { DEFAULT_URL } from "./api-client.js";
 export { EXIT } from "./exit.js";
 
-export const CLI_VERSION = "0.1.0";
+/** The version of this package, which the bundle carries inside it (esbuild inlines the JSON). */
+export const CLI_VERSION: string = cliPackage.version;
+
+/** How many tasks `status` shows: the newest, which is all it asks the server for. */
+const STATUS_TASKS = 10;
 
 /**
  * The commands that act on this host. The real ones (host.ts) load QEMU
@@ -83,16 +103,19 @@ Getting this host ready (the same commands on Linux and Windows):
 Using the server:
   invisible-dots init [file] [--force]          write a sample Dot config (default dot.yaml), check the server
   invisible-dots create <file.yaml>             create a Dot from a YAML config
+  invisible-dots update <dot> <file.yaml>       replace the Dot's config with a YAML config; refused if it was changed since this command read it
+  invisible-dots delete <dot> --yes             delete the Dot: its computer, its disk with everything on it, and its channels (cannot be undone)
   invisible-dots list                           list Dots
   invisible-dots status <dot>                   show a Dot, its computer and its recent tasks
   invisible-dots message <dot> <text...>        send a chat message
   invisible-dots task <dot> <description...> [--priority N] [--at ISO-8601]
                                                 queue a task
   invisible-dots tasks <dot>                    list a Dot's tasks
+  invisible-dots cancel <task-id>               cancel a task that has not finished
   invisible-dots computer <dot> start|stop|reboot
   invisible-dots browser <dot> identities       list the Dot's browser identities
   invisible-dots mcp <dot>                      list the MCP servers the Dot's config declares: where each is on its computer, and which secrets are set
-  invisible-dots approvals [--all]              list pending (or all) approvals
+  invisible-dots approvals [--all]              list pending approvals (--all: every approval, the newest first)
   invisible-dots approve <approval-id> [--note text] [--always]
                                                 --always also allows that permission for the Dot from now on
   invisible-dots reject <approval-id> [--note text]
@@ -107,14 +130,14 @@ Using the server:
   invisible-dots channel link whatsapp --dot <dot>
                                                 link a WhatsApp number (opt-in on the server, unofficial, a ban of the account is possible): shows a code to scan in WhatsApp > Linked devices
   invisible-dots channel list [--dot <dot>]     list channels (of every Dot without --dot) with their status and paired people
-  invisible-dots channel pair telegram --dot <dot>
-                                                print a one-time link (valid 10 minutes) that pairs your Telegram account to the Dot
-  invisible-dots channel remove telegram --dot <dot>
-                                                unlink: the token and the paired people are deleted
+  invisible-dots channel pair telegram|whatsapp --dot <dot>
+                                                print a one-time link (valid 10 minutes) that pairs your Telegram or WhatsApp account to the Dot
+  invisible-dots channel remove telegram|whatsapp --dot <dot>
+                                                unlink: the token (or the linked device's keys) and the paired people are deleted
   invisible-dots logs <dot> [--tail N] [--no-follow]
                                                 print recent events, then follow new ones
 
-<dot> is a Dot name or id. Add --json for machine-readable output.
+<dot> is a Dot name or id. Add --json for machine-readable output. invisible-dots --version prints the version.
 
 Environment:
   ${ENV.HOME}       the data directory (default ~/.invisible-dots)
@@ -162,6 +185,7 @@ const OPTIONS = {
   compress: { type: "boolean" },
   all: { type: "boolean" },
   clear: { type: "boolean" },
+  yes: { type: "boolean" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const;
@@ -244,12 +268,6 @@ const PAIRING_WORDS: Record<ChannelKind, { action: string; to: string }> = {
   whatsapp: { action: "press Send", to: "the number" },
 };
 
-/** How a channel's account reads: a Telegram bot as @name, the number linked to WhatsApp as +number. */
-function accountLabel(channel: ChannelRecord): string {
-  if (channel.account === null) return "-";
-  return channel.kind === "whatsapp" ? `+${channel.account}` : `@${channel.account}`;
-}
-
 function channelRows(rows: { dot: string; channel: ChannelRecord }[]): string {
   if (rows.length === 0) return "no channels: link one with invisible-dots channel add telegram --dot <dot>\n";
   return pad([
@@ -258,11 +276,44 @@ function channelRows(rows: { dot: string; channel: ChannelRecord }[]): string {
       dot,
       c.kind,
       c.enabled ? c.status : "paused",
-      accountLabel(c),
+      accountLabel(c.kind, c.account) ?? "-",
       c.peers.length === 0 ? "-" : c.peers.map((p) => p.label).join(", "),
       c.status_detail ? oneLine(c.status_detail, 80) : "",
     ]),
   ]);
+}
+
+/** The approvals in the words of the web client's approval card: the Dot by its name, what it wants to do, the permission with its risk. */
+function approvalRows(approvals: ApprovalRecord[], dotNames: ReadonlyMap<string, string>): string {
+  return pad([
+    ["ID", "STATUS", "DOT", "WANTS TO", "PERMISSION", "REASON"],
+    // A Dot that was deleted has no name any more: its id is what is left of it.
+    ...approvals.map((a) => [a.id, a.status, dotNames.get(a.dot_id) ?? a.dot_id, toolLabel(a.tool).ask, permissionPhrase(a.permission), oneLine(a.reason)]),
+  ]);
+}
+
+/** A Dot config read from a YAML file named on the command line. */
+async function readConfigFile(io: CliIo, path: string): Promise<string> {
+  const file = resolve(io.cwd, path);
+  try {
+    return await readFile(file, "utf8");
+  } catch (error) {
+    throw new UsageError(`cannot read ${file}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`);
+  }
+}
+
+/** The newest `count` events of the Dot's log, oldest first: read from the end, a page at a time, never from its start. */
+async function newestEvents(client: InvisibleDotsClient, dotId: string, count: number): Promise<StoredEvent[]> {
+  const found: StoredEvent[] = [];
+  let before: number | undefined;
+  while (found.length < count) {
+    const want = Math.min(count - found.length, MAX_EVENT_PAGE);
+    const page = await readRecentEvents(client, dotId, { count: want, before });
+    found.unshift(...page);
+    if (page.length < want) break;
+    before = page[0]!.id;
+  }
+  return found;
 }
 
 /** One line of a secret, from the terminal (echo off) or from stdin: never from the arguments, which end up in shell history and ps. */
@@ -356,15 +407,35 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
         return EXIT.ok;
       }
       case "create": {
-        const file = resolve(io.cwd, need(args, 0, "<file.yaml>"));
-        let yaml: string;
-        try {
-          yaml = await readFile(file, "utf8");
-        } catch (error) {
-          throw new UsageError(`cannot read ${file}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`);
-        }
+        const yaml = await readConfigFile(io, need(args, 0, "<file.yaml>"));
         const dot = await (await api()).createDot(yaml);
         out(dot, `created Dot ${dot.name} (${dot.id}); its computer is being provisioned.\nfollow it with: invisible-dots logs ${dot.name}\n`);
+        return EXIT.ok;
+      }
+      case "update": {
+        const name = need(args, 0, "<dot>");
+        const yaml = await readConfigFile(io, need(args, 1, "<file.yaml>"));
+        if (args.length > 2) throw new UsageError("update takes a Dot and one YAML file");
+        const c = await api();
+        // The version read here makes the save conditional: a config changed meanwhile (in the web client, by an
+        // "always allow") is a 409 and nothing is saved, instead of being overwritten unseen.
+        const current = await c.getDot(name);
+        const dot = await c.updateDot(current.id, yaml, current.config_version);
+        out(dot, `updated Dot ${dot.name} (config version ${dot.config_version})\n`);
+        return EXIT.ok;
+      }
+      case "delete": {
+        const name = need(args, 0, "<dot>");
+        noArguments(args.slice(1), "delete <dot>");
+        if (values.yes !== true) {
+          throw new UsageError(
+            `delete destroys Dot ${name}'s computer and its disk, with every file, memory note and browser identity on them, and its channels; it cannot be undone. To do it: invisible-dots delete ${name} --yes`,
+          );
+        }
+        const c = await api();
+        const dot = await c.getDot(name);
+        const answer = await c.deleteDot(dot.id);
+        out(answer, `deleting Dot ${dot.name}; what it did stays in its log: invisible-dots logs ${dot.id}\n`);
         return EXIT.ok;
       }
       case "list": {
@@ -375,7 +446,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
       case "status": {
         const name = need(args, 0, "<dot>");
         const c = await api();
-        const [dot, computer, tasks] = await Promise.all([c.getDot(name), c.computer(name), c.listTasks(name)]);
+        const [dot, computer, tasks] = await Promise.all([c.getDot(name), c.computer(name), c.listTasks(name, { limit: STATUS_TASKS })]);
         const text =
           pad([
             ["name", dot.name],
@@ -388,7 +459,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
             ["next automation", nextAutomation(computer)],
           ]) +
           "\n" +
-          taskRows(tasks.slice(0, 10));
+          taskRows(tasks);
         out({ dot, computer, tasks }, text);
         return EXIT.ok;
       }
@@ -430,6 +501,13 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
         out(tasks, taskRows(tasks));
         return EXIT.ok;
       }
+      case "cancel": {
+        const id = need(args, 0, "<task-id>");
+        noArguments(args.slice(1), "cancel <task-id>");
+        const task = await (await api()).cancelTask(id);
+        out(task, `task ${task.id} ${task.status}\n`);
+        return EXIT.ok;
+      }
       case "computer": {
         const name = need(args, 0, "<dot>");
         const action = need(args, 1, "start|stop|reboot");
@@ -459,17 +537,13 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
         return EXIT.ok;
       }
       case "approvals": {
-        const approvals = await (await api()).listApprovals(values.all ? undefined : "pending");
+        const c = await api();
+        // With --all the newest come first, as in the web client's history, so the cap of the list drops the oldest and
+        // never the newest; the pending ones come oldest first, the one that has waited longest on top.
+        const [approvals, dots] = await Promise.all([values.all ? c.listApprovals(undefined, { order: "desc" }) : c.listApprovals("pending"), c.listDots()]);
         out(
           approvals,
-          approvals.length === 0
-            ? values.all
-              ? "no approvals\n"
-              : "no pending approvals\n"
-            : pad([
-                ["ID", "STATUS", "DOT", "TOOL", "REASON"],
-                ...approvals.map((a) => [a.id, a.status, a.dot_id, a.tool, oneLine(a.reason)]),
-              ]),
+          approvals.length === 0 ? (values.all ? "no approvals\n" : "no pending approvals\n") : approvalRows(approvals, new Map(dots.map((d) => [d.id, d.name]))),
         );
         return EXIT.ok;
       }
@@ -574,7 +648,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
                 if (!values.json) io.stdout(`${await QRCode.toString(frame.code, { type: "terminal", small: true })}\n`);
               } else if (frame.state === "linked") {
                 if (!values.json) {
-                  io.stdout(`linked WhatsApp${frame.account ? ` number +${frame.account}` : ""} to Dot ${name}\nnext: invisible-dots channel pair whatsapp --dot ${name}\n`);
+                  io.stdout(`linked WhatsApp${frame.account ? ` number ${accountLabel("whatsapp", frame.account)}` : ""} to Dot ${name}\nnext: invisible-dots channel pair whatsapp --dot ${name}\n`);
                 }
                 return EXIT.ok;
               } else if (frame.state === "failed") {
@@ -628,16 +702,10 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
           if (error instanceof ApiError && error.status === 404 && name.includes("_")) return { id: name };
           throw error;
         });
-        let recent: StoredEvent[] = [];
-        let after = 0;
-        for (;;) {
-          const page = await c.events(dot.id, { after, limit: 1000 });
-          recent = [...recent, ...page].slice(-Math.max(tail, 1));
-          if (page.length < 1000) break;
-          after = page.at(-1)!.id;
-        }
-        const last = recent.at(-1)?.id ?? after;
-        for (const event of tail === 0 ? [] : recent) io.stdout(values.json ? `${JSON.stringify(event)}\n` : `${formatEvent(event)}\n`);
+        // The newest `tail` events, and at least the newest one, which following goes on from.
+        const recent = await newestEvents(c, dot.id, Math.max(tail, 1));
+        const last = recent.at(-1)?.id ?? 0;
+        for (const event of recent.slice(recent.length - tail)) io.stdout(values.json ? `${JSON.stringify(event)}\n` : `${formatEvent(event)}\n`);
         if (values["no-follow"]) return EXIT.ok;
         for await (const event of c.stream({
           dotId: dot.id,

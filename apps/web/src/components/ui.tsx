@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface Resource<T> {
   data: T | undefined;
@@ -12,7 +12,8 @@ export interface Resource<T> {
 /**
  * Load data on mount and whenever `key` changes. Answers that arrive after a
  * newer load started are dropped, so a slow response never overwrites a
- * fresh one.
+ * fresh one. The object returned is the same until one of its fields changes,
+ * so a memo or a context value built from it changes only with it.
  */
 export function useResource<T>(load: () => Promise<T>, key: string): Resource<T> {
   const [data, setData] = useState<T | undefined>(undefined);
@@ -50,7 +51,7 @@ export function useResource<T>(load: () => Promise<T>, key: string): Resource<T>
     reload();
   }, [key, reload]);
 
-  return { data, error, loading, reload };
+  return useMemo(() => ({ data, error, loading, reload }), [data, error, loading, reload]);
 }
 
 /** Run an action, tracking its pending state and error. */

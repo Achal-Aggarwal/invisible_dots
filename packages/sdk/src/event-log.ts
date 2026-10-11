@@ -1,19 +1,18 @@
 /**
  * Reading a Dot's event log through the one route that serves it, `GET /api/dots/:id/events`, which keeps the types
- * (and the task) a caller names in the database so only those cross the wire. No view reads the whole log of a Dot:
- * that costs more with every day it lives. A view reads what it shows, bounded on one side: the events of one task
- * (`taskId`), the events from a point on (`readEventLog` with `after`), the range between two points
- * (`readEventRange`), or the newest window (`readRecentEvents`, which the Activity page goes on from, older, a page
- * at a time, with a `before`). Each says which types it reads and, where a type alone is not enough, what else an
- * event must be.
+ * (and the task) a caller names in the database so only those cross the wire. No client reads the whole log of a Dot:
+ * that costs more with every day it lives. The web client's views and `invisible-dots logs` read what they show,
+ * bounded on one side: the events of one task (`taskId`), the events from a point on (`readEventLog` with `after`),
+ * the range between two points (`readEventRange`), or the newest window (`readRecentEvents`, which the Activity page
+ * goes on from, older, a page at a time, with a `before`). Each says which types it reads and, where a type alone is
+ * not enough, what else an event must be.
  */
-import type { InvisibleDotsClient } from "@invisible-dots/sdk";
-import { MAX_EVENT_PAGE } from "@invisible-dots/shared/browser";
-import type { StoredEvent } from "./types";
+import { MAX_EVENT_PAGE, type StoredEvent } from "@invisible-dots/shared/browser";
+import type { InvisibleDotsClient } from "./client.js";
 
 export interface EventLogQuery {
-  /** The event type names to read; the control plane refuses a name it does not know. */
-  types: readonly string[];
+  /** The event type names to read (every type when omitted or empty); the control plane refuses a name it does not know. */
+  types?: readonly string[];
   /** Narrows the `tool.called` events to those of these tools (`data.tool`), in the database; other types are not affected. */
   tools?: readonly string[];
   /** Only the events of this task (`data.task_id`), in the database. */

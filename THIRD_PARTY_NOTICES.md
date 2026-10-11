@@ -266,7 +266,7 @@ SOFTWARE.
 ## OpenDots (CopilotKit)
 
 `apps/web/src/lib/time.ts`, `apps/web/src/lib/use-visible-interval.ts`,
-`apps/web/src/lib/events/tool-labels.ts` and
+`packages/shared/src/labels.ts` and
 `apps/web/src/components/tasks/task-status.tsx` derive from OpenDots by CopilotKit
 (https://github.com/CopilotKit/OpenDots, commit 88f2a08); each file's first
 comment says what was changed.

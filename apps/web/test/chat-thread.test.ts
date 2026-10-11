@@ -1,6 +1,7 @@
 import type { StoredEvent } from "@invisible-dots/shared/browser";
 import { describe, expect, it } from "vitest";
-import { activityOf, buildThread, CLUSTER_AFTER, clusterSummary, groupActivity, lastStepSinceUser, mergeChatEvents, toolStateOf, unsettled, type ToolStep } from "../src/lib/chat-thread";
+import { activityOf, buildThread, CLUSTER_AFTER, clusterSummary, groupActivity, lastStepSinceUser, mergeChatEvents, unsettled } from "../src/lib/chat-thread";
+import { toolStateOf, type ToolStep } from "../src/lib/steps";
 import type { ChatMessage } from "../src/lib/types";
 
 let n = 0;
@@ -58,6 +59,8 @@ describe("the activity of the chat", () => {
     expect(waiting).toMatchObject({ kind: "approval", outcome: "waiting", label: "Ran a command", reason: "to list files" });
     expect(activityOf([asked, event("approval.resolved", { approval_id: "a1", decision: "approve" })])[0]).toMatchObject({ outcome: "approved" });
     expect(activityOf([asked, event("approval.resolved", { approval_id: "a1", decision: "reject" })])[0]).toMatchObject({ outcome: "rejected" });
+    // The note the person wrote with the answer is kept, as a task's story keeps it.
+    expect(activityOf([asked, event("approval.resolved", { approval_id: "a1", decision: "reject", note: "not now" })])[0]).toMatchObject({ note: "not now" });
     // An answer to somebody else's approval changes nothing.
     expect(activityOf([asked, event("approval.resolved", { approval_id: "other", decision: "reject" })])[0]).toMatchObject({ outcome: "waiting" });
   });

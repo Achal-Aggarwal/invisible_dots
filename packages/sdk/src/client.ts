@@ -10,7 +10,6 @@ import {
   type ListOrder,
   type McpSecretsAnswer,
   type StoredEvent,
-  type ToolInfo,
   type Skill,
   type SkillListAnswer,
   type ToolListAnswer,

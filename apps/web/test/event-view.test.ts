@@ -41,32 +41,34 @@ describe("viewEvent", () => {
     expect(entry.detail).toBe("browser_identity_delete [browser.identity.delete] - cleanup");
   });
 
-  it("marks denied and failed tool calls as errors and successful ones as neutral", () => {
+  it("marks a failed tool call as an error, a denied one as a warning (it never ran) and a successful one as neutral", () => {
     const ok = viewEvent(
       event(4, "tool.called", { tool: "computer_exec", permission: "computer.exec", decision: "allow", ok: true, duration_ms: 41.6 }),
     );
-    expect(ok).toMatchObject({ title: "Called computer_exec", detail: "ok in 42 ms | computer_exec [computer.exec] allow", tone: "neutral" });
+    expect(ok).toMatchObject({ title: "Called computer_exec", detail: "done in 42 ms | computer_exec [computer.exec] allow", tone: "neutral" });
     const denied = viewEvent(
       event(5, "tool.called", { tool: "nope", permission: "", decision: "deny", ok: false, duration_ms: 0 }),
     );
-    expect(denied).toMatchObject({ detail: "denied in 0 ms | nope deny", tone: "error" });
+    expect(denied).toMatchObject({ detail: "denied in 0 ms | nope deny", tone: "warn" });
+    const failed = viewEvent(event(6, "tool.called", { tool: "exec", permission: "computer.exec", decision: "allow", ok: false, duration_ms: 3 }));
+    expect(failed).toMatchObject({ detail: "failed in 3 ms | exec [computer.exec] allow", tone: "error" });
   });
 
   it("says what a tool call acted on and what policy decided, in the words of the tool", () => {
     const call = { permission: "computer.exec", decision: "allow", ok: true, duration_ms: 1200 };
     expect(viewEvent(event(20, "tool.called", { tool: "exec", target: "ls -la /home/dot", ...call }))).toMatchObject({
       title: "Ran a command",
-      detail: "ls -la /home/dot | ok in 1200 ms | exec [computer.exec] allow",
+      detail: "ls -la /home/dot | done in 1.2 s | exec [computer.exec] allow",
       tool: "exec",
       family: "tools",
     });
     expect(viewEvent(event(23, "tool.called", { tool: "exec", target: "python3", permission: "computer.exec", decision: "allow", ok: true, duration_ms: 50, tty: true }))).toMatchObject({
       title: "Started a terminal session",
-      detail: "python3 | ok in 50 ms | exec [computer.exec] allow",
+      detail: "python3 | done in 50 ms | exec [computer.exec] allow",
     });
     // A call that waited for the person says so in its decision; one cut off by a restart is neither a success nor a failure of the call.
     expect(viewEvent(event(21, "tool.called", { tool: "write_file", permission: "files.write", decision: "ask", ok: true, duration_ms: 3 })).detail).toBe(
-      "ok in 3 ms | write_file [files.write] ask",
+      "done in 3 ms | write_file [files.write] ask",
     );
     expect(viewEvent(event(22, "tool.called", { tool: "exec", target: "sleep 99", permission: "computer.exec", decision: "allow", ok: false, duration_ms: 0, interrupted: true }))).toMatchObject({
       detail: "sleep 99 | interrupted in 0 ms | exec [computer.exec] allow",
@@ -89,8 +91,8 @@ describe("viewEvent", () => {
   });
 
   it("says when an approval was answered for good, and the priority a task was created with", () => {
-    expect(viewEvent(event(29, "approval.resolved", { approval_id: "apr_2", decision: "approve", always: true }, "host"))).toMatchObject({ title: "Approved, and always allowed", tone: "ok" });
-    expect(viewEvent(event(30, "approval.resolved", { approval_id: "apr_3", decision: "approve" }, "host")).title).toBe("Approved");
+    expect(viewEvent(event(29, "approval.resolved", { approval_id: "apr_2", decision: "approve", always: true }, "host"))).toMatchObject({ title: "Allowed for good", tone: "ok" });
+    expect(viewEvent(event(30, "approval.resolved", { approval_id: "apr_3", decision: "approve" }, "host")).title).toBe("Allowed");
     expect(viewEvent(event(31, "task.created", { task_id: "t", description: "look", priority: 100 }, "host")).detail).toBe("look (priority 100)");
     expect(viewEvent(event(32, "task.created", { task_id: "t", description: "look" }, "host")).detail).toBe("look");
   });
@@ -137,7 +139,7 @@ describe("viewEvent", () => {
       source: "host",
     });
     expect(viewEvent(event(8, "approval.resolved", { approval_id: "apr_1", decision: "reject", note: "no" }, "host")))
-      .toMatchObject({ title: "Rejected", detail: "apr_1 - no", tone: "warn" });
+      .toMatchObject({ title: "Denied", detail: "apr_1 - no", tone: "warn" });
   });
 
   it("describes the channel events by their kind and status", () => {

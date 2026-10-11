@@ -11,7 +11,7 @@ function approval(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
     dot_id: "dot_1",
     task_id: null,
     tool: "exec",
-    permission: "exec.run",
+    permission: "computer.exec",
     arguments: { command: "ls -la" },
     reason: "the tool needs approval",
     status: "pending",
@@ -54,15 +54,19 @@ describe("the data of an approval button", () => {
 });
 
 describe("what an approval prompt says", () => {
-  it("names the tool, the permission, the reason and the arguments", () => {
+  it("says what the Dot wants to do and the permission with its risk, in the web client's words, then the reason and the arguments", () => {
     expect(approvalPromptText(approval(), true)).toBe(
-      ['The Dot asks to use exec (permission exec.run).', "Reason: the tool needs approval", 'Arguments: {"command":"ls -la"}'].join("\n"),
+      ["The Dot wants to run a command.", "Permission: Run commands (high risk)", "Reason: the tool needs approval", 'Arguments: {"command":"ls -la"}'].join("\n"),
     );
+  });
+
+  it("names a tool or a permission it has no words for as it is", () => {
+    expect(approvalPromptText(approval({ tool: "rm_rf", permission: "exec.run", arguments: {}, reason: "" }), true)).toBe(["The Dot wants to call rm_rf.", "Permission: exec.run"].join("\n"));
   });
 
   it("cuts the arguments and the reason to the limit, and shows that they were cut", () => {
     const text = approvalPromptText(approval({ arguments: { command: "x".repeat(2000) }, reason: "r".repeat(2000) }), true);
-    const [, reason, args] = text.split("\n") as [string, string, string];
+    const [, , reason, args] = text.split("\n") as [string, string, string, string];
     expect(reason.slice("Reason: ".length)).toHaveLength(APPROVAL_PROMPT_TEXT_MAX);
     expect(args.slice("Arguments: ".length)).toHaveLength(APPROVAL_PROMPT_TEXT_MAX);
     expect(reason.endsWith("...")).toBe(true);
@@ -73,16 +77,16 @@ describe("what an approval prompt says", () => {
 
   it("keeps a prompt on one line per fact: line breaks and runs of spaces in the arguments collapse", () => {
     const text = approvalPromptText(approval({ arguments: { command: "a\n\n   b" }, reason: "line one\nline two" }), true);
-    expect(text.split("\n")).toEqual(["The Dot asks to use exec (permission exec.run).", "Reason: line one line two", 'Arguments: {"command":"a\\n\\n b"}']);
+    expect(text.split("\n")).toEqual(["The Dot wants to run a command.", "Permission: Run commands (high risk)", "Reason: line one line two", 'Arguments: {"command":"a\\n\\n b"}']);
   });
 
   it("leaves out what is empty", () => {
-    expect(approvalPromptText(approval({ arguments: {}, reason: "" }), true)).toBe("The Dot asks to use exec (permission exec.run).");
+    expect(approvalPromptText(approval({ arguments: {}, reason: "" }), true)).toBe("The Dot wants to run a command.\nPermission: Run commands (high risk)");
   });
 
   it("leaves the arguments out, in the prompt and in the outcome, when the channel is set not to show them", () => {
     const text = approvalPromptText(approval(), false);
-    expect(text).toBe(["The Dot asks to use exec (permission exec.run).", "Reason: the tool needs approval"].join("\n"));
+    expect(text).toBe(["The Dot wants to run a command.", "Permission: Run commands (high risk)", "Reason: the tool needs approval"].join("\n"));
     expect(text).not.toContain("ls -la");
     expect(approvalOutcomeText(approval({ status: "approved" }), false)).toBe(`${text}\n\nApproved.`);
   });

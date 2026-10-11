@@ -86,8 +86,8 @@ export function route(template: string, params: Record<string, string> = {}, que
 }
 
 /** The first word(s) of each `invisible-dots` command the run calls, and the flags it passes. */
-export const CLI_COMMANDS = ["doctor", "image build", "server", "secret openrouter", "create", "task", "message", "computer", "approve", "reject"] as const;
-export const CLI_FLAGS = ["--json", "--note", "--always", "--no-web"] as const;
+export const CLI_COMMANDS = ["doctor", "image build", "server", "secret openrouter", "secret mcp", "mcp", "create", "task", "message", "computer", "approve", "reject"] as const;
+export const CLI_FLAGS = ["--json", "--note", "--always", "--no-web", "--dot", "--version"] as const;
 
 /** The Dot's tools the run asserts on (nanobot/dots/permissions.py `TOOL_PERMISSIONS`), with the permission each exercises. */
 export const TOOLS = {

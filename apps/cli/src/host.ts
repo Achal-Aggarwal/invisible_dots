@@ -172,7 +172,6 @@ export function realHostCommands(): HostCommands {
         web: () => buildWeb(builds),
         images: () => imageBuild(io),
         env: io.env,
-        tokenPath: hostPaths(io.env).apiTokenPath,
         ...(io.signal ? { signal: io.signal } : {}),
       });
     },

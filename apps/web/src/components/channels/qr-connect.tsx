@@ -1,14 +1,13 @@
 // Derived from nanobot webui/src/components/settings/channels/ChannelQrConnectFlow.tsx at 9dc0aba, MIT; changed: the flow reads the host's stream of frames instead of polling a session (its states are the pure reducer in lib/channel-link.ts), the code is drawn as an SVG from the QR modules instead of a canvas data URL, there is no i18n and no client provider, and cancelling removes the channel the start created, or only pauses one that holds people.
 "use client";
 
-import type { ChannelRecord } from "@invisible-dots/shared/browser";
+import { accountLabel, type ChannelRecord } from "@invisible-dots/shared/browser";
 import { CheckIcon, Loader2Icon, RotateCcwIcon, SmartphoneIcon } from "lucide-react";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
 import { IDLE, linkEnded, reduceLink, STREAM_LOST, type LinkView } from "../../lib/channel-link";
-import { accountLabel } from "../../lib/channels";
 import { ErrorAlert } from "../ErrorAlert";
 import { useAction } from "../ui";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";

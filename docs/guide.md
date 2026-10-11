@@ -288,9 +288,9 @@ that failed in the last 24 hours, and a channel that has to be linked again. An
 approval says what the Dot wants to do, under which permission and why, shows a
 command, a diff of a file change, an address or a schedule in the form that
 reads best, and answers with Allow once, Always allow or Deny with a note. With
-the keyboard, `j` and `k` move between the cards, `a` allows the selected one
-once and `d` denies it; a command or a deletion is not allowed by a key press
-alone.
+the keyboard, once the list of approvals has the focus (click it or Tab to it),
+`j` and `k` move between the cards, `a` allows the selected one once and `d`
+denies it; a command or a deletion is not allowed by a key press alone.
 
 **A Dot's page** has seven tabs:
 
@@ -328,8 +328,9 @@ while you have stopped it.
 | `invisible-dots message <dot> <text>` | a message in its one persistent conversation |
 | `invisible-dots task <dot> <text> [--priority N] [--at ISO-8601]` | a queued task; a higher priority runs first, `--at` sets the earliest start |
 | `invisible-dots tasks <dot>` | its tasks and their status |
+| `invisible-dots cancel <task-id>` | stop a task that has not finished |
 | `invisible-dots logs <dot> [--tail N] [--no-follow]` | its events, then new ones as they come |
-| `invisible-dots approvals [--all]` | pending approvals (all of them with `--all`) |
+| `invisible-dots approvals [--all]` | pending approvals (all of them, the newest first, with `--all`) |
 | `invisible-dots approve <id> [--always] [--note text]` | let that one call run; `--always` also allows its permission for the Dot from now on |
 | `invisible-dots reject <id> [--note text]` | refuse it; the model is told no |
 | `invisible-dots computer <dot> start\|stop\|reboot` | power its computer on or off by hand |
@@ -339,11 +340,10 @@ while you have stopped it.
 | `invisible-dots channel list [--dot <dot>]` | linked chats and who is paired |
 | `invisible-dots channel remove telegram\|whatsapp --dot <dot>` | unlink a chat; its token or keys and paired people are deleted |
 | `invisible-dots secret openrouter --dot <dot>` | a key for one Dot instead of the global one |
+| `invisible-dots update <dot> <file.yaml>` | replace its configuration; refused if it changed since the command read it |
+| `invisible-dots delete <dot> --yes` | delete it: its computer, its disk and its channels; without `--yes` it only says what would go |
 
 `<dot>` is a Dot's name or id, and `--json` gives machine-readable output.
-Editing a Dot's configuration and deleting a Dot are done in the web UI (its
-settings tab) or through the API (`PATCH` and `DELETE /api/dots/:id`); the
-command line has no command for either yet.
 
 ## Approvals
 

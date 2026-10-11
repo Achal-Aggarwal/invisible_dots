@@ -462,7 +462,7 @@ describe.each(testAdapters())("the hub with the real Telegram adapter (%s)", { t
     const id = dot.guest.requestApproval(undefined, "exec");
     await waitFor(() => bots.prompts(TOKEN, 10).length === 1, "the prompt");
     const [prompt] = bots.prompts(TOKEN, 10);
-    expect(prompt!.text).toContain("The Dot asks to use exec");
+    expect(prompt!.text).toContain("The Dot wants to run a command.");
     expect(prompt!.buttons.map((b) => b.text)).toEqual(["Approve", "Reject"]);
     expect(prompt!.buttons.every((b) => Buffer.byteLength(b.data) <= 64 && b.data.endsWith(id))).toBe(true);
 

@@ -354,9 +354,11 @@ describe("what the Dot did between its messages", () => {
     plane.store("d1", "approval.requested", ask("a1"));
     await renderChat();
     await screen.findByRole("article", { name: "Wants to run a command" });
-    act(() => plane.push("d1", "approval.resolved", { approval_id: "a1", decision: "approve", always: true }));
+    act(() => plane.push("d1", "approval.resolved", { approval_id: "a1", decision: "approve", always: true, note: "fine from now on" }));
     await waitFor(() => expect(screen.getByText(/^Allowed for good:/)).toBeTruthy());
     expect(screen.queryByRole("article", { name: "Wants to run a command" })).toBeNull();
+    // The note sent with the answer stays on the receipt, as on a task's story.
+    expect(screen.getByText("Note: fine from now on")).toBeTruthy();
   });
 
   it("follows the Dot live: a call that arrives shows at once, and an answer arrives from the log", async () => {

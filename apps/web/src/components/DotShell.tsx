@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { api, ApiError } from "../lib/api";
 import type { Dot } from "../lib/types";
 import { DotHeader } from "./dot/DotHeader";
@@ -49,6 +49,8 @@ export function DotShell({ dotId, children }: { dotId: string; children: ReactNo
     if (address) router.replace(`/dots/${encodeURIComponent(canonical)}${pathname.slice(address[0].length)}${window.location.search}${window.location.hash}`);
   }, [canonical, pathname, router]);
 
+  const value = useMemo(() => ({ dotId, dot }), [dotId, dot]);
+
   // A Dot the control plane does not have (deleted, or never this host's): no header, tabs or composer for it.
   if (dot.error instanceof ApiError && dot.error.status === 404) {
     return (
@@ -65,7 +67,7 @@ export function DotShell({ dotId, children }: { dotId: string; children: ReactNo
   }
 
   return (
-    <DotContext.Provider value={{ dotId, dot }}>
+    <DotContext.Provider value={value}>
       <div className="flex min-h-0 flex-1 flex-col">
         <DotHeader dotId={dotId} dot={dot} />
         <DotTabs dotId={dotId} />

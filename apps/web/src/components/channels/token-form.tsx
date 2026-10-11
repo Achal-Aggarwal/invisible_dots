@@ -1,9 +1,9 @@
 "use client";
 
+import { accountLabel } from "@invisible-dots/shared/browser";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
-import { accountLabel } from "../../lib/channels";
 import { ErrorAlert } from "../ErrorAlert";
 import { Field } from "../new-dot/Field";
 import { useAction } from "../ui";

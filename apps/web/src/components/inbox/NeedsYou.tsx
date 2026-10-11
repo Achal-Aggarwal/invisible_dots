@@ -121,8 +121,8 @@ function Key({ children }: { children: string }) {
 /**
  * What needs the person (S6): the approvals that wait, oldest first, each answerable where it stands; Dots in an error
  * state; tasks that failed in the last day; channels that need linking again. An approval that was answered here
- * stays in its place as a receipt until the person leaves, so that nothing jumps away under the pointer. Keys: j and k
- * move, a allows once, d denies.
+ * stays in its place as a receipt until the person leaves, so that nothing jumps away under the pointer. Keys, while
+ * the focus is in the list of the approvals: j and k move, a allows once, d denies.
  */
 export function NeedsYou({ filter }: { filter: Filter }) {
   const { dots, approvals, attention, failedTasks, relinks, dismissFailedTask } = useShell();
@@ -143,15 +143,16 @@ export function NeedsYou({ filter }: { filter: Filter }) {
   const unlinked = otherThings ? relinks.items.filter((relink) => filter.dotId === null || relink.dot_id === filter.dotId) : [];
   const waitingCount = asks.filter((ask) => !answers.settled.has(ask.id)).length;
 
-  const keys = useInboxKeys(asks, answers, true, (dotId) => names.get(dotId) ?? dotId);
+  const keys = useInboxKeys(asks, answers, (dotId) => names.get(dotId) ?? dotId);
   const loading = (approvals.data === undefined && !approvals.error) || (dots.data === undefined && !dots.error);
   // "Nothing needs you" is said only once everything has been read, failed tasks and channels included: the approvals do not wait for them.
   const empty = !loading && !failedTasks.loading && !relinks.loading && asks.length === 0 && broken.length === 0 && failed.length === 0 && unlinked.length === 0;
 
   return (
     <div className="space-y-6">
-      <p className="text-xs text-muted-foreground">
-        Keys: <Key>j</Key> and <Key>k</Key> move between the cards, <Key>a</Key> allows the selected one once, <Key>d</Key> denies it.
+      <p id="inbox-keys" className="text-xs text-muted-foreground">
+        Keys, once the list of approvals has the focus (click it or Tab to it): <Key>j</Key> and <Key>k</Key> move between the cards, <Key>a</Key> allows the selected one
+        once, <Key>d</Key> denies it.
       </p>
       <p role="status" className="sr-only">
         {keys.announcement}
@@ -167,7 +168,13 @@ export function NeedsYou({ filter }: { filter: Filter }) {
 
       {!loading && asks.length > 0 ? (
         <Section id="inbox-approvals" title="Waiting for your answer" count={waitingCount}>
-          <ul className="space-y-3">
+          <ul
+            aria-label="Approvals waiting for your answer"
+            aria-describedby="inbox-keys"
+            tabIndex={0}
+            className="space-y-3 rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background focus-visible:outline-hidden"
+            {...keys.listProps}
+          >
             {asks.map((ask) => (
               <li key={ask.id}>
                 <ApprovalCard ask={ask} answers={answers} dotName={names.get(ask.dotId) ?? ask.dotId} selected={keys.selectedId === ask.id} />
