@@ -14,7 +14,7 @@
  * restart the pid file stands in for it, checked as `processIsOurs` says.
  */
 import { randomBytes } from "node:crypto";
-import { access, appendFile, mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   allowlistedEnvironment,
@@ -23,9 +23,12 @@ import {
   hostRestartedSince,
   hostUptimeSeconds,
   isFatalGuestError,
+  pathExists,
+  prefixedStderrLogger,
   replaceFile,
   type DotConfig,
   type HostPaths,
+  type Logger,
   type VmState,
 } from "@invisible-dots/shared";
 import {
@@ -40,7 +43,6 @@ import {
 } from "./errors.js";
 import { GuestClient, waitForGuestHealth, type GuestClientOptions, type WaitForGuestHealthOptions } from "./guest-client.js";
 import { accelerator as hostAccelerator, findQemu, type Accelerator, type QemuInstallation } from "./host.js";
-import { stderrLogger, type Logger } from "./logger.js";
 import { pickFreePort, portListens } from "./ports.js";
 import { readProcessFile, writeProcessFile, type ProcessFile } from "./process-file.js";
 import { checkVmResources, CPU_MODEL, qemuArgs, qemuPathArg } from "./qemu-args.js";
@@ -183,15 +185,6 @@ function assertDotId(dotId: string): void {
   }
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** QEMU wrote this when it could not bind the host side of the port forward. */
 const PORT_TAKEN = /Could not set up host forwarding rule/i;
 
@@ -257,7 +250,7 @@ export class VmManager {
     this.options = options;
     this.env = options.env ?? process.env;
     this.paths = options.paths ?? hostPaths(this.env);
-    this.logger = options.logger ?? stderrLogger;
+    this.logger = options.logger ?? prefixedStderrLogger("vm-manager");
     this.runner = options.runner ?? new NodeCommandRunner();
     this.processes = options.processes ?? new NodeProcessControl();
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -372,7 +365,7 @@ export class VmManager {
       ["golden image", spec.goldenImage],
       ["runtime ISO", spec.runtimeImage],
     ] as const) {
-      if (!(await exists(path))) throw new VmManagerError(`${label} ${path} does not exist: build it with "invisible-dots image build" first`);
+      if (!(await pathExists(path))) throw new VmManagerError(`${label} ${path} does not exist: build it with "invisible-dots image build" first`);
     }
   }
 
@@ -411,7 +404,7 @@ export class VmManager {
       await mkdir(dir, { recursive: true, mode: 0o700 });
       const diskPath = this.paths.diskPath(spec.dotId);
       let diskCreated = false;
-      if (await exists(diskPath)) {
+      if (await pathExists(diskPath)) {
         this.logger.warn("overlay already exists, keeping it", { dotId: spec.dotId, disk: diskPath });
       } else {
         await this.qemuImg(["create", "-f", "qcow2", "-F", "qcow2", "-b", qemuPathArg("golden image", spec.goldenImage), qemuPathArg("disk", diskPath), String(spec.diskBytes)]);
@@ -540,7 +533,7 @@ export class VmManager {
     }
     await this.forget(dotId);
     const diskPath = this.paths.diskPath(dotId);
-    if (!(await exists(diskPath))) throw new VmStateError(dotId, `${diskPath} does not exist; create the VM first`);
+    if (!(await pathExists(diskPath))) throw new VmStateError(dotId, `${diskPath} does not exist; create the VM first`);
     await this.assertImages(spec);
     await this.writeSeed(spec);
     const qemu = await this.qemu();

@@ -76,7 +76,6 @@ export * from "./errors.js";
 export * from "./guest-client.js";
 export * from "./host-doctor.js";
 export * from "./host.js";
-export * from "./logger.js";
 export * from "./ports.js";
 export * from "./powershell.js";
 export * from "./process-file.js";

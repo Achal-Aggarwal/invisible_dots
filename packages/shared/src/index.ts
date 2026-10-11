@@ -1,6 +1,7 @@
 export * from "./api-token.js";
 export * from "./browser.js";
 export * from "./files.js";
+export * from "./path-exists.js";
 export * from "./paths.js";
 export * from "./sockets.js";
 export * from "./stderr-logger.js";

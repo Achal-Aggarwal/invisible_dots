@@ -9,10 +9,10 @@
  * - every start uses the newest `runtime-<version>.iso`, so a new version of
  *   our code reaches a Dot with a restart (section 3.3).
  */
-import { access, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { type ComputerDriver, type ComputerSpecInput, type ComputerState, type CreatedComputer, type GuestApi, type GuestEndpoint, type StartedComputer, type WaitForHealthOptions } from "@invisible-dots/scheduler";
-import { type HealthAnswer, type HostPaths, type ImageKind, imageLabel, imageVersionOf, type Logger } from "@invisible-dots/shared";
+import { type HealthAnswer, type HostPaths, type ImageKind, imageLabel, imageVersionOf, type Logger, pathExists } from "@invisible-dots/shared";
 import { VmManager, type StartVmResult, type VmSpec } from "@invisible-dots/vm-manager";
 
 /** Compare versions such as "2026.10.1" and "2026.9.3" numerically, part by part. */
@@ -112,7 +112,7 @@ export class VmManagerDriver implements ComputerDriver {
   }
 
   async state(dotId: string): Promise<ComputerState> {
-    const [info, exists] = await Promise.all([this.#vm.state(dotId), fileExists(this.#vm.paths.diskPath(dotId))]);
+    const [info, exists] = await Promise.all([this.#vm.state(dotId), pathExists(this.#vm.paths.diskPath(dotId))]);
     return {
       exists,
       state: info.state,
@@ -130,14 +130,6 @@ export class VmManagerDriver implements ComputerDriver {
   async close(): Promise<void> {}
 }
 
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** The driver `invisible-dots server` uses: VmManager over this host's QEMU and INVISIBLE_DOTS_HOME. */
 export function createVmDriver(options: { env: Record<string, string | undefined>; paths: HostPaths; logger: Logger }): VmManagerDriver {

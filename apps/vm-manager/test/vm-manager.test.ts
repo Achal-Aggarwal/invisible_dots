@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
-import { hostPaths, type HostPaths } from "@invisible-dots/shared";
+import { hostPaths, type HostPaths, silentLogger } from "@invisible-dots/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AcceleratorUnavailableError,
@@ -18,7 +18,6 @@ import {
   VmStateError,
   generateToken,
   qemuArgs,
-  silentLogger,
   vmSpecFromConfig,
   type VmManagerOptions,
   type VmSpec,
