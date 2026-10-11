@@ -579,6 +579,10 @@ describe.each(testAdapters())("control-plane API (%s)", (kind) => {
       [b.id, "telegram"],
     ]);
     expect(JSON.stringify(every)).not.toMatch(/token/i);
+    // The channels run until they are removed: this test stops what it started, so no later test or teardown inherits them.
+    await channels.remove(a.id, "telegram");
+    await channels.remove(b.id, "telegram");
+    expect((await api.everyChannel()).filter((c) => c.dot_id === a.id || c.dot_id === b.id)).toEqual([]);
   });
 
   it("messages: the newest page of a long conversation, and a cursor that goes back through the rest", async () => {

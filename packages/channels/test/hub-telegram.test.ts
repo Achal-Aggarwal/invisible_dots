@@ -256,12 +256,16 @@ describe.each(testAdapters())("the hub with the real Telegram adapter (%s)", { t
   });
 
   it("waits at least what Telegram asks when a poll is answered with a 429", async () => {
+    // A bot of its own: the test before polls TOKEN every few milliseconds, and a poll of it still on its way when that
+    // test ends is answered after this one starts, as Telegram answers a request whose client has gone. On TOKEN it
+    // would take the 429 meant for this test, which would then wait for an error that never comes.
+    const token = "424242:RATE-LIMITED-BOT";
     const w = await world();
-    bots.addBot(TOKEN, "dot_helper_bot");
-    bots.failNext(TOKEN, "getUpdates", { error_code: 429, description: "x", retry_after: 1 });
+    bots.addBot(token, "dot_limited_bot");
+    bots.failNext(token, "getUpdates", { error_code: 429, description: "x", retry_after: 1 });
     const { hub } = await w.hub(telegram());
     const dot = await w.dot();
-    await hub.add(dot.id, "telegram", { credentials: { telegram_bot_token: TOKEN } });
+    await hub.add(dot.id, "telegram", { credentials: { telegram_bot_token: token } });
     // Read from the log, where every change of status is recorded: polling the status itself can miss an error that
     // lasts only the second Telegram asked for, when a loaded machine makes one read longer than that.
     const changes = async () =>
