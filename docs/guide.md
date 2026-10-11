@@ -792,7 +792,8 @@ hook looks for it in `tmp/gates-venv` first:
 CI runs on pushes to main and on pull requests: typecheck and vitest on Linux
 and Windows, the database layer against a real PostgreSQL, dot-agentd's Go
 tests and static build, the engine's pytest, the ISO images read by the Linux
-kernel, both smokes, the web build with its Playwright tests, and two prose
+kernel, both smokes, the web build with its Playwright tests, the opt-in
+WhatsApp client against its real library, and two prose
 gates (English only, and a README that promises nothing it cannot support). The
 vitest, Go, pytest and Playwright runs are counted against the floors in
 `.github/test-floors.json`, and the smokes fail on a skipped check, so a test
@@ -805,7 +806,7 @@ that stops running fails the build.
 | `guest/` | `dot-agentd` (Go) and the image builder |
 | `invisible_engine_dots/` | the Dot's engine (Python) and its built-in skills |
 | `virtualization/` | the pinned QEMU, cloud-init templates, base image metadata |
-| `tests/` | checks over the whole repository, and the real-VM run |
+| `tests/` | checks over the whole repository, the real-VM run, and the agent benchmark |
 
 </details>
 

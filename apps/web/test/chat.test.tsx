@@ -547,11 +547,11 @@ describe("the composer", () => {
     expect(window.localStorage.getItem("idots.draft.d1")).toBeNull();
   });
 
-  it("says why it is closed for a Dot that is disabled or being deleted", async () => {
-    plane.dots = [dotRecord("d1", { name: "fares", status: "DISABLED" })];
+  it("says why it is closed for a Dot being deleted", async () => {
+    plane.dots = [dotRecord("d1", { name: "fares", computer_state: "DELETING" })];
     await renderChat();
     await waitFor(() => expect(box().disabled).toBe(true));
-    expect(screen.getAllByText("This Dot is disabled, so it does not answer.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("This Dot is being deleted.").length).toBeGreaterThan(0);
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
   });
 

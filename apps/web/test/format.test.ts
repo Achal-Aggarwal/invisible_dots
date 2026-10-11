@@ -64,8 +64,6 @@ describe("computerView", () => {
   it("enables only the power actions that fit the state", () => {
     expect(allowedActions("STOPPED")).toEqual({ start: true, stop: false, reboot: false });
     expect(allowedActions("RUNNING")).toEqual({ start: false, stop: true, reboot: true });
-    // The host reboots only a RUNNING computer.
-    expect(allowedActions("IDLE")).toEqual({ start: false, stop: true, reboot: false });
     expect(allowedActions("STARTING")).toEqual({ start: false, stop: false, reboot: false });
   });
 

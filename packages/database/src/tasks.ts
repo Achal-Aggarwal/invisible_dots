@@ -77,7 +77,7 @@ const CLAIMABLE = `
   JOIN computers c ON c.dot_id = t.dot_id
  WHERE t.status = 'PENDING'
    AND (t.scheduled_at IS NULL OR t.scheduled_at <= now())
-   AND d.status NOT IN ('CREATING', 'DISABLED')
+   AND d.status <> 'CREATING'
    AND c.state NOT IN ('PROVISIONING', 'DELETING')
    AND NOT EXISTS (SELECT 1 FROM tasks busy WHERE busy.dot_id = t.dot_id AND busy.status IN ${ACTIVE})`;
 
@@ -293,19 +293,10 @@ export class TasksRepository {
         WHERE p.status = 'PENDING'
           AND (p.scheduled_at IS NULL OR p.scheduled_at <= now())
           AND c.state = 'STOPPED'
-          AND d.status NOT IN ('CREATING', 'DISABLED', 'ERROR')
+          AND d.status NOT IN ('CREATING', 'ERROR')
           AND EXISTS (SELECT 1 FROM tasks busy WHERE busy.dot_id = p.dot_id AND busy.status IN ${ACTIVE})
         ORDER BY p.dot_id`,
     );
     return rows.map((r) => r.dot_id);
-  }
-
-  /** The tasks a Dot's guest is working on, as the host last heard. */
-  async activeForDot(dotId: string): Promise<TaskRecord[]> {
-    const { rows } = await this.q.query<TaskRow>(
-      `SELECT * FROM tasks WHERE dot_id = $1 AND status IN ${ACTIVE} ORDER BY created_at`,
-      [dotId],
-    );
-    return rows.map(toTask);
   }
 }

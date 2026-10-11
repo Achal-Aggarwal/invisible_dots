@@ -13,6 +13,7 @@
  * nothing waits for a timer once the guest is back.
  */
 import { TASK_ENDED_BEFORE_DELIVERY, type Database, type InboundRecord } from "@invisible-dots/database";
+import type { EventLog } from "@invisible-dots/events";
 import { guestErrorCode, guestErrorStatus } from "./driver.js";
 import type { Lifecycle } from "./lifecycle.js";
 import { errorMessage, type Clock, type Logger } from "./support.js";
@@ -31,6 +32,7 @@ export const DEFAULT_INBOUND_OPTIONS: InboundDeliveryOptions = {
 
 export interface InboundDeliveryDeps {
   db: Database;
+  events: EventLog;
   lifecycle: Lifecycle;
   clock: Clock;
   logger: Logger;
@@ -51,8 +53,12 @@ function knownUndelivered(error: unknown): boolean {
   return guestErrorStatus(error) >= 400 || (error as { code?: unknown })?.code === "ECONNREFUSED";
 }
 
+/** Rolls back a give-up whose task ended before it: the task keeps that end and logs no failure. */
+class TaskAlreadyEnded extends Error {}
+
 export class InboundDelivery {
   readonly #db: Database;
+  readonly #events: EventLog;
   readonly #lifecycle: Lifecycle;
   readonly #clock: Clock;
   readonly #log: Logger;
@@ -68,6 +74,7 @@ export class InboundDelivery {
 
   constructor(deps: InboundDeliveryDeps) {
     this.#db = deps.db;
+    this.#events = deps.events;
     this.#lifecycle = deps.lifecycle;
     this.#clock = deps.clock;
     this.#log = deps.logger;
@@ -245,17 +252,33 @@ export class InboundDelivery {
     this.#schedule(row.dot_id, this.#opts.retryDelayMs * failures);
   }
 
-  /** Drop a row for good; a task.created takes its task with it. */
+  /**
+   * Drop a row for good; a task.created takes its task with it, logged as `task.failed` in the same transaction like
+   * every task state change. A task that ended meanwhile (cancelled) keeps its end: only the row is dropped.
+   */
   async #giveUp(row: InboundRecord, reason: string): Promise<void> {
-    let settled = false;
-    await this.#db.transaction(async (tx) => {
-      await tx.inbound.drop(row.event.id, reason);
-      if (row.event.type === "task.created" && row.task_id) {
-        settled = (await tx.tasks.transition(row.task_id, "FAILED", { error: reason })) !== null;
+    const taskId = row.event.type === "task.created" ? row.task_id : null;
+    if (taskId) {
+      const logged = await this.#db
+        .transaction(async (tx) => {
+          // The event first: its insert takes the event-order lock (database events.ts).
+          const event = await this.#events.appendHostIn(tx, row.dot_id, "task.failed", { task_id: taskId, error: reason });
+          if (!(await tx.tasks.transition(taskId, "FAILED", { error: reason }))) throw new TaskAlreadyEnded();
+          await tx.inbound.drop(row.event.id, reason);
+          return event;
+        })
+        .catch((error: unknown) => {
+          if (error instanceof TaskAlreadyEnded) return null;
+          throw error;
+        });
+      if (logged) {
+        this.#events.publish(logged);
+        this.#log.error("task delivery failed for good", { taskId, error: reason });
+        this.#onTaskSettled();
+        return;
       }
-    });
-    if (row.event.type === "task.created") this.#log.error("task delivery failed for good", { taskId: row.task_id, error: reason });
-    if (settled) this.#onTaskSettled();
+    }
+    await this.#db.inbound.drop(row.event.id, reason);
   }
 
   /** scheduled_at style: compared with the database's now(), so a zero delay is "no date" rather than this host's now. */

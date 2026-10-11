@@ -14,6 +14,7 @@ import {
   type DotState,
   type HostEventDataMap,
   type OutboundEvent,
+  type PermissionName,
 } from "@invisible-dots/shared";
 
 /**
@@ -33,7 +34,7 @@ export function dotStatusForAgent(state: AgentState): DotState {
 }
 
 /** Dot states the agent's own reports never override: they are set by the control plane. */
-const STICKY_DOT_STATES: readonly DotState[] = ["CREATING", "ERROR", "DISABLED", "IDLE"];
+const STICKY_DOT_STATES: readonly DotState[] = ["CREATING", "ERROR", "IDLE"];
 
 export interface AppliedGuestEvent {
   /** A task reached a terminal state, so the Dot may take the next one. */
@@ -48,21 +49,13 @@ type HostEventOf = { [K in keyof HostEventDataMap]: { type: K; data: HostEventDa
 
 /** The tool of the engine that asks to add an MCP server; its approvals are the person's consent to one. */
 export const ADD_MCP_SERVER_TOOL = "add_mcp_server";
-const ADD_PERMISSION = "mcp.servers.add";
-
-/** A value as JSON with every object's keys in order, so the same arguments compare equal however they were written. */
-function canonical(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    item !== null && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : item,
-  );
-}
+const ADD_PERMISSION: PermissionName = "mcp.servers.add";
 
 /**
  * A Dot added an MCP server to its own config. The config is the host's, so the host decides again what the engine
- * decided: the permission allows it, or the person approved a call of exactly these arguments. The entry is checked by
- * the config's own schema, and a name already declared is not replaced. The server's own permission is left to its
+ * decided: the permission allows it, or the person approved a call of exactly these arguments, and that approval is
+ * used up here, so it adds one server once. The entry is checked by the config's own schema first (a call refused for
+ * it keeps its approval), and a name already declared is not replaced. The server's own permission is left to its
  * default, ask, so each of its tools still asks until the person allows it.
  */
 async function addMcpServer(tx: Repositories, dotId: string, args: Record<string, unknown>): Promise<AppliedGuestEvent> {
@@ -72,22 +65,22 @@ async function addMcpServer(tx: Repositories, dotId: string, args: Record<string
   if (!dot) return refuse("the Dot no longer exists");
   const decision = resolvePermission(dot.config, ADD_PERMISSION);
   if (decision === "deny") return refuse(`the Dot's config denies ${ADD_PERMISSION}`);
-  if (decision === "ask") {
-    const approved = await tx.approvals.list({ status: "approved", dotId, order: "desc" });
-    const wanted = canonical(args);
-    if (!approved.some((a) => a.tool === ADD_MCP_SERVER_TOOL && canonical(a.arguments) === wanted)) {
-      return refuse(`${ADD_PERMISSION} asks, and no approval of exactly these arguments was given`);
-    }
-  }
   if (!isMcpServerName(name)) return refuse(`"${name}" is not an MCP server's name`);
   if (name in dot.config.mcp_servers) return refuse(`the Dot's config already declares an MCP server "${name}"`);
   const { name: _name, reason: _reason, ...entry } = args;
   const parsed = parseMcpServerEntry(entry);
   if (!parsed.ok) return refuse(parsed.problem);
   const config = parseDotConfig({ ...dot.config, mcp_servers: { ...dot.config.mcp_servers, [name]: parsed.server } });
+  let approvalId: string | undefined;
+  if (decision === "ask") {
+    const approval = await tx.approvals.useApproved(dotId, ADD_MCP_SERVER_TOOL, args);
+    if (!approval) return refuse(`${ADD_PERMISSION} asks, and no unused approval of exactly these arguments was given`);
+    approvalId = approval.id;
+  }
   const reconfigured = await tx.dots.updateConfig(dotId, config);
   if (!reconfigured) return refuse("the Dot no longer exists");
-  return { taskSettled: false, reconfigured, hostEvents: [{ type: "dot.updated", data: { name: dot.name, mcp_server_added: name } }] };
+  const added = { name: dot.name, mcp_server_added: name, ...(approvalId && { approval_id: approvalId }) };
+  return { taskSettled: false, reconfigured, hostEvents: [{ type: "dot.updated", data: added }] };
 }
 
 /** The spend a task event reports (architecture section 5.4), onto the task's row; events without it change nothing. */

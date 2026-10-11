@@ -191,19 +191,20 @@ export class EventLog {
 
     let lastId = options.after ?? 0;
     try {
-      const replayed = new Set<number>();
       if (options.after !== undefined) {
         for (;;) {
           const page = await this.repo.list({ dotId: filter.dotId, after: lastId, limit: 500 });
           for (const event of page) {
             if (options.signal?.aborted) return;
-            replayed.add(event.id);
             lastId = Math.max(lastId, event.id);
             yield event;
           }
           if (page.length < 500) break;
         }
       }
+      // Ids become visible in id order (database events.ts), so every event up to the last one the replay read was
+      // visible to it: a live event at or below it was replayed (or is before `after`), one above it is new.
+      const replayedThrough = lastId;
       for (;;) {
         if (options.signal?.aborted) return;
         if (overflowed) throw new StreamOverflowError(lastId);
@@ -214,7 +215,7 @@ export class EventLog {
           });
           continue;
         }
-        if (replayed.size > 0 && replayed.has(next.id)) continue;
+        if (next.id <= replayedThrough) continue;
         lastId = Math.max(lastId, next.id);
         yield next;
       }

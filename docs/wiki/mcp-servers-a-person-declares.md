@@ -47,8 +47,9 @@ entries of that shape.
   Node.js), then asks with `add_mcp_server`, as NanoClaw's agents do, under the
   permission `mcp.servers.add`, which asks by default. The person reads the
   whole entry on the approval: what it runs or where it is, the secrets they will
-  set, and why. The host checks that approval again before it writes the server,
-  and the server starts at once, with no restart. A stdio server runs as the
+  set, and why. The host checks that approval again before it writes the server
+  and uses it up, so one approval adds one server once; the server starts at
+  once, with no restart. A stdio server runs as the
   Dot's user, with what running a command already gives it, so what the Dot gains
   are tools, each still asking. Only the person changes or removes a server.
 - **One permission per server**, `mcp.<server>`, asked by default and weighed

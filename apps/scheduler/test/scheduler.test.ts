@@ -906,6 +906,10 @@ describe.each(testAdapters())("Scheduler with a fake driver and a fake guest (%s
     const doomed = await scheduler.createTask(dot.id, { description: "never" });
     await waitFor(async () => (await db.tasks.get(doomed.id))?.status === "FAILED", "failed task", 8_000);
     expect((await db.tasks.get(doomed.id))?.error).toMatch(/after 2 attempts/);
+    // The host ended the task, so the host logs its end: every view that follows task.failed sees it.
+    const failed = await db.events.list({ dotId: dot.id, types: ["task.failed"], taskId: doomed.id });
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ source: "host", data: { task_id: doomed.id, error: expect.stringMatching(/after 2 attempts/) } });
   });
 
   it("cancel: a pending task never runs, a finished one answers 409", async () => {
@@ -1283,7 +1287,37 @@ describe.each(testAdapters())("Scheduler with a fake driver and a fake guest (%s
         expect(config.mcp_servers.clock).toEqual({ command: "uvx", args: ["mcp-server-time"], env: {}, secrets: [], timeout_s: 120, startup_timeout_s: 60 });
         expect(config.permissions).not.toHaveProperty("mcp.clock");
         await waitFor(() => guest.config?.mcp_servers.clock !== undefined, "the config pushed to the guest");
-        expect((await db.events.list({ dotId: dot.id })).some((e) => e.type === "dot.updated" && e.data.mcp_server_added === "clock")).toBe(true);
+        expect((await db.events.list({ dotId: dot.id })).some((e) => e.type === "dot.updated" && e.data.mcp_server_added === "clock" && e.data.approval_id === id)).toBe(true);
+      });
+
+      it("uses an approval up: it adds one server once, and a call refused for its entry keeps it", async () => {
+        const { scheduler, driver } = make();
+        const dot = await scheduler.createDot(`${yaml("mcp-once")}mcp_servers:\n  clock:\n    command: npx\n`);
+        await waitUntilSettledReady(scheduler, driver, dot.id, "mcp-once");
+        const guest = driver.guestOf(dot.id);
+        const id = guest.requestApproval(undefined, "add_mcp_server", "mcp.servers.add", ARGS);
+        await waitFor(async () => (await db.approvals.get(id)) !== null, "the approval stored");
+        await scheduler.resolveApproval(id, "approve");
+
+        // "clock" is taken: refused before the approval is touched.
+        guest.emit("mcp.server.added", { arguments: ARGS });
+        await waitFor(async () => (await refusals(dot.id)).length === 1, "refused: the name is taken");
+        expect((await refusals(dot.id))[0]).toEqual({ name: "clock", reason: 'the Dot\'s config already declares an MCP server "clock"' });
+
+        // The person frees the name: the same approval adds it now.
+        await scheduler.updateDot(dot.id, yaml("mcp-once"));
+        guest.emit("mcp.server.added", { arguments: ARGS });
+        await waitFor(async () => {
+          const clock = (await db.dots.get(dot.id))?.config.mcp_servers.clock;
+          return clock !== undefined && "command" in clock && clock.command === "uvx";
+        }, "added with the approval");
+
+        // Removed again, the same call cannot bring it back on the approval it used.
+        await scheduler.updateDot(dot.id, yaml("mcp-once"));
+        guest.emit("mcp.server.added", { arguments: ARGS });
+        await waitFor(async () => (await refusals(dot.id)).length === 2, "refused: the approval is used");
+        expect((await refusals(dot.id))[1]).toEqual({ name: "clock", reason: "mcp.servers.add asks, and no unused approval of exactly these arguments was given" });
+        expect((await db.dots.get(dot.id))?.config.mcp_servers).toEqual({});
       });
 
       it("is written without an approval when the person allowed mcp.servers.add", async () => {
@@ -1302,7 +1336,7 @@ describe.each(testAdapters())("Scheduler with a fake driver and a fake guest (%s
         const guest = driver.guestOf(dot.id);
         guest.emit("mcp.server.added", { arguments: ARGS });
         await waitFor(async () => (await refusals(dot.id)).length === 1, "the first refusal");
-        expect((await refusals(dot.id))[0]).toEqual({ name: "clock", reason: "mcp.servers.add asks, and no approval of exactly these arguments was given" });
+        expect((await refusals(dot.id))[0]).toEqual({ name: "clock", reason: "mcp.servers.add asks, and no unused approval of exactly these arguments was given" });
 
         await scheduler.updateDot(dot.id, `${yaml("mcp-refused")}permissions:\n  mcp.servers.add: allow\nmcp_servers:\n  taken:\n    command: uvx\n`);
         guest.emit("mcp.server.added", { arguments: { name: "taken", command: "npx" } });

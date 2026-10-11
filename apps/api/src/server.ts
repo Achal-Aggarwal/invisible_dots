@@ -224,9 +224,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   // Messages and tasks
 
   app.post<{ Params: Params }>("/api/dots/:id/messages", async (request, reply) => {
-    const text = bodyOf(request).text;
-    if (typeof text !== "string") throw bad("text must be a string");
-    return reply.code(202).send(await scheduler.sendMessage(request.params.id, text));
+    return reply.code(202).send(await scheduler.sendMessage(request.params.id, bodyOf(request).text));
   });
 
   // The conversation pages like the event log: oldest first by default, `order=desc` the newest, `before` (the
@@ -413,12 +411,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   for (const decision of ["approve", "reject"] as const) {
     app.post<{ Params: Params }>(`/api/approvals/:id/${decision}`, async (request) => {
       const { note, always } = bodyOf(request);
-      if (note !== undefined && typeof note !== "string") throw bad("note must be a string");
-      if (always !== undefined && always !== true) throw bad("always must be true");
-      return scheduler.resolveApproval(request.params.id, decision, {
-        ...(note !== undefined ? { note } : {}),
-        ...(always !== undefined ? { always } : {}),
-      });
+      return scheduler.resolveApproval(request.params.id, decision, { note, always });
     });
   }
 
@@ -476,12 +469,7 @@ export function buildServer(options: ServerOptions): FastifyInstance {
   });
 
   app.get<{ Querystring: { dot_id?: string; after?: string } }>("/api/stream", async (request, reply) => {
-    let dotId: string | undefined;
-    if (request.query.dot_id) {
-      const dot = await scheduler.db.dots.resolve(request.query.dot_id);
-      if (!dot && !request.query.dot_id.includes("_")) throw new ControlPlaneError(404, "not_found", `Dot "${request.query.dot_id}" not found`);
-      dotId = dot?.id ?? request.query.dot_id;
-    }
+    const dotId = request.query.dot_id ? await scheduler.historyDotId(request.query.dot_id) : undefined;
     // EventSource sends the last id it saw when it reconnects; it wins over the query.
     const lastEventId = request.headers["last-event-id"];
     const after = intParam(typeof lastEventId === "string" ? lastEventId : request.query.after, "after");

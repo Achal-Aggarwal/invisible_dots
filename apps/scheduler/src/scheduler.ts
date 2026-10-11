@@ -59,6 +59,7 @@ import { guestErrorCode, guestErrorStatus, type ComputerDriver, type GuestApi } 
 import { InboundDelivery, type InboundDeliveryOptions } from "./inbound.js";
 import { Lifecycle, MISSING_KEY_MESSAGE, type LifecycleOptions } from "./lifecycle.js";
 import {
+  BackgroundWork,
   ControlPlaneError,
   errorMessage,
   notFound,
@@ -103,7 +104,7 @@ export class Scheduler {
   readonly #log: Logger;
   readonly #dispatchIntervalMs: number;
   readonly #idleCheckIntervalMs: number;
-  readonly #background = new Set<Promise<unknown>>();
+  readonly #background: BackgroundWork;
   readonly #provisioning = new Map<string, Promise<void>>();
   readonly #timers: NodeJS.Timeout[] = [];
   #started = false;
@@ -112,6 +113,7 @@ export class Scheduler {
     this.db = options.db;
     this.#clock = options.clock ?? systemClock;
     this.#log = options.logger ?? silentLogger;
+    this.#background = new BackgroundWork(this.#log);
     this.events =
       options.events ?? new EventLog(options.db.events, (line) => this.#log.warn(line));
     this.#dispatchIntervalMs = options.dispatchIntervalMs ?? 5_000;
@@ -128,6 +130,7 @@ export class Scheduler {
     });
     this.inbound = new InboundDelivery({
       db: options.db,
+      events: this.events,
       lifecycle: this.lifecycle,
       clock: this.#clock,
       logger: this.#log,
@@ -148,8 +151,8 @@ export class Scheduler {
   async start(): Promise<void> {
     if (this.#started) return;
     this.#started = true;
-    for (const work of await this.lifecycle.recover()) this.#track(work);
-    this.#track(this.pass());
+    for (const work of await this.lifecycle.recover()) this.#background.track(work);
+    this.#background.track(this.pass());
     const every = (ms: number, fn: () => Promise<unknown>) => {
       const timer = setInterval(() => void fn().catch((e) => this.#log.error("timer failed", { error: errorMessage(e) })), ms);
       timer.unref();
@@ -171,12 +174,12 @@ export class Scheduler {
     for (const dotId of await this.db.tasks.stoppedDotsWithBlockedWork()) {
       if (this.lifecycle.isBusy(dotId)) continue;
       this.#log.info("waking a stopped Dot: new work waits behind its unfinished task", { dotId });
-      this.#runInBackground("wake for blocked work", dotId, () => this.lifecycle.ensureReady(dotId));
+      this.#background.run("wake for blocked work", dotId, () => this.lifecycle.ensureReady(dotId));
     }
     for (const dotId of await this.lifecycle.stoppedDotsWithAutomationDue()) {
       if (this.lifecycle.isBusy(dotId)) continue;
       this.#log.info("waking a stopped Dot: an automation is due", { dotId });
-      this.#runInBackground("wake for an automation", dotId, () => this.lifecycle.wakeForAutomation(dotId));
+      this.#background.run("wake for an automation", dotId, () => this.lifecycle.wakeForAutomation(dotId));
     }
   }
 
@@ -194,30 +197,13 @@ export class Scheduler {
       await this.dispatcher.settle();
       await this.inbound.settle();
       await this.lifecycle.settle();
-      const pending = [...this.#background];
-      if (pending.length === 0) {
+      if (!this.#background.busy) {
         // Each of the three may have started work in another while it settled.
         if (!this.dispatcher.busy && !this.inbound.busy && !this.lifecycle.busy) return;
         continue;
       }
-      await Promise.allSettled(pending);
+      await this.#background.settle();
     }
-  }
-
-  #track<T>(work: Promise<T>): Promise<T> {
-    const tracked = work.finally(() => this.#background.delete(tracked));
-    tracked.catch(() => {});
-    this.#background.add(tracked);
-    return work;
-  }
-
-  /** Run something in the background and log its failure. */
-  #runInBackground(what: string, dotId: string, work: () => Promise<unknown>): void {
-    this.#track(
-      work().catch((error) => {
-        this.#log.error(`${what} failed`, { dotId, error: errorMessage(error) });
-      }),
-    );
   }
 
   // Dots
@@ -274,7 +260,7 @@ export class Scheduler {
     this.#log.info("dot created", { dotId: id, name: config.name });
     const provisioning = this.lifecycle.provision(id);
     this.#provisioning.set(id, provisioning);
-    this.#runInBackground("provisioning", id, () =>
+    this.#background.run("provisioning", id, () =>
       provisioning.finally(() => {
         this.#provisioning.delete(id);
       }),
@@ -326,8 +312,8 @@ export class Scheduler {
 
   /**
    * The Dot's saved config changed (a PATCH, an "always allow"; `dot.updated` was logged with the change), or a secret of
-   * its MCP servers did: push the secrets and the config to the guest. A failed push does not fail the change: both are
-   * pushed again on the next READY.
+   * its MCP servers did: push the secrets and the config to the guest. A failed push does not fail the change: the Dot
+   * is suspect then (`syncGuest`), and both are pushed again on its next READY.
    */
   async #pushToGuest(dot: DotRecord): Promise<void> {
     try {
@@ -337,13 +323,12 @@ export class Scheduler {
         dotId: dot.id,
         error: errorMessage(error),
       });
-      this.lifecycle.markSuspect(dot.id);
     }
   }
 
   async deleteDot(idOrName: string): Promise<AcceptedAnswer> {
     const dot = await this.requireDot(idOrName);
-    this.#runInBackground("deletion", dot.id, () => this.lifecycle.remove(dot.id));
+    this.#background.run("deletion", dot.id, () => this.lifecycle.remove(dot.id));
     return { accepted: true };
   }
 
@@ -357,7 +342,7 @@ export class Scheduler {
    * is routed back by) and never sent to the guest. Only code inside the
    * control plane passes one: the HTTP route does not take it.
    */
-  async sendMessage(idOrName: string, text: string, origin?: MessageOrigin): Promise<MessageAnswer> {
+  async sendMessage(idOrName: string, text: unknown, origin?: MessageOrigin): Promise<MessageAnswer> {
     if (typeof text !== "string" || text.trim() === "") {
       throw new ControlPlaneError(400, "invalid_request", "text must be a non-empty string");
     }
@@ -542,7 +527,7 @@ export class Scheduler {
     if (dot.computer_state === "PROVISIONING" || dot.computer_state === "DELETING") {
       throw new ControlPlaneError(409, "invalid_state", `the computer is ${dot.computer_state}`);
     }
-    this.#runInBackground("start", dot.id, () => this.lifecycle.ensureReady(dot.id));
+    this.#background.run("start", dot.id, () => this.lifecycle.ensureReady(dot.id));
     return { accepted: true };
   }
 
@@ -551,7 +536,7 @@ export class Scheduler {
     if (dot.computer_state === "PROVISIONING" || dot.computer_state === "DELETING") {
       throw new ControlPlaneError(409, "invalid_state", `the computer is ${dot.computer_state}`);
     }
-    this.#runInBackground("stop", dot.id, () => this.lifecycle.stop(dot.id, "user"));
+    this.#background.run("stop", dot.id, () => this.lifecycle.stop(dot.id, "user"));
     return { accepted: true };
   }
 
@@ -560,7 +545,7 @@ export class Scheduler {
     if (!computerIsUp(dot.computer_state)) {
       throw new ControlPlaneError(409, COMPUTER_STOPPED, `the computer is ${dot.computer_state ?? "missing"}`);
     }
-    this.#runInBackground("reboot", dot.id, () => this.lifecycle.reboot(dot.id));
+    this.#background.run("reboot", dot.id, () => this.lifecycle.reboot(dot.id));
     return { accepted: true };
   }
 
@@ -681,7 +666,7 @@ export class Scheduler {
   ): Promise<ApprovalRecord[]> {
     const { dot, ...rest } = page;
     // Of one Dot (by id or name; the history of a deleted Dot is read by id, as the event log's is), in the database.
-    return this.db.approvals.list({ status, ...rest, ...(dot === undefined ? {} : { dotId: await this.#historyDotId(dot) }) });
+    return this.db.approvals.list({ status, ...rest, ...(dot === undefined ? {} : { dotId: await this.historyDotId(dot) }) });
   }
 
   /**
@@ -702,17 +687,18 @@ export class Scheduler {
   async resolveApproval(
     id: string,
     decision: "approve" | "reject",
-    answer: { note?: string; always?: true } = {},
+    answer: { note?: unknown; always?: unknown } = {},
   ): Promise<ApprovalRecord> {
-    const { note, always } = answer;
-    if (note !== undefined && typeof note !== "string") {
+    if (answer.note !== undefined && typeof answer.note !== "string") {
       throw new ControlPlaneError(400, "invalid_request", "note must be a string");
     }
+    if (answer.always !== undefined && answer.always !== true) {
+      throw new ControlPlaneError(400, "invalid_request", "always must be true");
+    }
+    const note = answer.note as string | undefined;
+    const always = answer.always as true | undefined;
     if (note !== undefined && note.length > APPROVAL_NOTE_MAX) {
       throw new ControlPlaneError(400, "invalid_request", `note must be at most ${APPROVAL_NOTE_MAX} characters`);
-    }
-    if (always !== undefined && always !== true) {
-      throw new ControlPlaneError(400, "invalid_request", "always must be true");
     }
     if (always && decision !== "approve") {
       throw new ControlPlaneError(400, "invalid_request", "always applies to an approval, not to a rejection");
@@ -771,7 +757,7 @@ export class Scheduler {
   // Events and secrets
 
   /** The id of a Dot whose history is read: a deleted Dot's history stays readable by id. */
-  async #historyDotId(idOrName: string): Promise<string> {
+  async historyDotId(idOrName: string): Promise<string> {
     const dot = await this.db.dots.resolve(idOrName);
     const dotId = dot?.id ?? (idOrName.includes("_") ? idOrName : undefined);
     if (!dotId) throw notFound("Dot", idOrName);
@@ -791,12 +777,12 @@ export class Scheduler {
     if (filter.taskId === "") throw new ControlPlaneError(400, "invalid_request", "task_id must not be empty");
     const types = filter.types === undefined || filter.types.length === 0 ? undefined : filter.types;
     const tools = filter.tools === undefined || filter.tools.length === 0 ? undefined : filter.tools;
-    return this.events.query({ dotId: await this.#historyDotId(idOrName), after: filter.after, before: filter.before, limit: filter.limit, types, tools, taskId: filter.taskId, order: filter.order });
+    return this.events.query({ dotId: await this.historyDotId(idOrName), after: filter.after, before: filter.before, limit: filter.limit, types, tools, taskId: filter.taskId, order: filter.order });
   }
 
   /** The model spend the Dot's guest reported since `since` (every event when omitted), from the event log. */
   async usage(idOrName: string, since?: Date): Promise<UsageAnswer> {
-    const dotId = await this.#historyDotId(idOrName);
+    const dotId = await this.historyDotId(idOrName);
     return { dot_id: dotId, since: since?.toISOString() ?? null, spent_usd: await this.db.events.spentUsd(dotId, since) };
   }
 
@@ -874,14 +860,13 @@ export class Scheduler {
         if (await this.lifecycle.syncGuest(dotId)) pushed++;
       } catch (error) {
         this.#log.warn("could not push the new OpenRouter key", { dotId, error: errorMessage(error) });
-        this.lifecycle.markSuspect(dotId);
       }
     }
     // Dots that failed READY only for want of a key can be retried now.
     for (const dot of await this.db.dots.list()) {
       const missedKey = dot.error?.includes(MISSING_KEY_MESSAGE) ?? false;
       if (dot.status === "ERROR" && missedKey && (scope === GLOBAL_SCOPE || scope === dot.id)) {
-        this.#runInBackground("READY after a new key", dot.id, () => this.lifecycle.ensureReady(dot.id));
+        this.#background.run("READY after a new key", dot.id, () => this.lifecycle.ensureReady(dot.id));
       }
     }
     return { pushed };
@@ -910,7 +895,7 @@ export class Scheduler {
       if (await this.lifecycle.keepsAwake(dotId)) continue;
       this.#log.info("dot idle, going to sleep", { dotId, idleMs: now.getTime() - lastActive });
       sleeping.push(dotId);
-      this.#runInBackground("idle sleep", dotId, () => this.lifecycle.stop(dotId, "idle"));
+      this.#background.run("idle sleep", dotId, () => this.lifecycle.stop(dotId, "idle"));
     }
     return sleeping;
   }

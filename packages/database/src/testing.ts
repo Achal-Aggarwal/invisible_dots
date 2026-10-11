@@ -84,7 +84,7 @@ async function adminQuery(url: string, sql: string): Promise<void> {
 }
 
 /** The repositories a `killedAt` can name. */
-export type KillableRepository = "dots" | "computers" | "tasks" | "channels" | "events" | "approvals";
+export type KillableRepository = "dots" | "computers" | "tasks" | "channels" | "events" | "approvals" | "inbound";
 
 /**
  * The database as seen by a process that is killed at one write: once `kill()` is called, `repository.method` inside a

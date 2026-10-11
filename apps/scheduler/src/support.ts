@@ -84,3 +84,43 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Work a caller starts without waiting for it (a provisioning, a stop, a push to a guest): its failure is logged,
+ * since nobody awaits it, and `settle` waits until all of it has finished (tests and shutdown). After `close` nothing
+ * new starts.
+ */
+export class BackgroundWork {
+  readonly #pending = new Set<Promise<unknown>>();
+  #closed = false;
+
+  constructor(private readonly log: Logger) {}
+
+  /** Start `work`; a failure is logged as "<what> failed" with the Dot. */
+  run(what: string, dotId: string, work: () => Promise<unknown>): void {
+    if (this.#closed) return;
+    this.track(work().catch((error) => this.log.error(`${what} failed`, { dotId, error: errorMessage(error) })));
+  }
+
+  /** Count a promise as background work until it settles; it is returned as it is, for a caller that awaits it. */
+  track<T>(work: Promise<T>): Promise<T> {
+    const tracked = work.finally(() => this.#pending.delete(tracked));
+    tracked.catch(() => {});
+    this.#pending.add(tracked);
+    return work;
+  }
+
+  /** Whether any of it is still running. */
+  get busy(): boolean {
+    return this.#pending.size > 0;
+  }
+
+  /** Wait until all of it has finished, including work started meanwhile. */
+  async settle(): Promise<void> {
+    while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
+  }
+
+  close(): void {
+    this.#closed = true;
+  }
+}

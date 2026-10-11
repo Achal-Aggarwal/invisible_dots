@@ -1,5 +1,5 @@
 /** What the Computer page shows: allocated resources from the config, live usage from the VM when it runs. */
-import { COMPUTER_STOPPED, computerIsUp } from "@invisible-dots/shared/browser";
+import { COMPUTER_STOPPED } from "@invisible-dots/shared/browser";
 import { ApiError } from "./api";
 import { relativeTime } from "./time";
 import type { Computer, DotConfig, SystemAnswer, VmState } from "./types";
@@ -8,7 +8,6 @@ const COMPUTER_STATE_LABELS: Record<VmState, string> = {
   PROVISIONING: "Provisioning",
   STARTING: "Starting",
   RUNNING: "Running",
-  IDLE: "Idle",
   STOPPING: "Stopping",
   STOPPED: "Stopped",
   ERROR: "Error",
@@ -130,9 +129,7 @@ export function allowedActions(state: string): { start: boolean; stop: boolean; 
     case "ERROR":
       return { start: true, stop: state === "ERROR", reboot: false };
     case "RUNNING":
-    case "IDLE":
-      // The host reboots only a computer whose guest answers.
-      return { start: false, stop: true, reboot: computerIsUp(state) };
+      return { start: false, stop: true, reboot: true };
     case "PROVISIONING":
     case "STARTING":
     case "STOPPING":

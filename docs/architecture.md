@@ -123,6 +123,8 @@ tests/
   e2e/             the real-VM acceptance run (`node tests/e2e/run.ts`, on a Linux host with an
                    accelerator and an OpenRouter key; not in CI), its stand-in Linux host for
                    machines that cannot run it directly, and README.md
+  bench/           the agent benchmark on real Dots (Harbor tasks, written by its generators before
+                   every run, and LongMemEval), run by hand in a container; README.md
 docs/
 ```
 
@@ -135,8 +137,7 @@ npm workspace. `invisible_engine_dots/` is not part of it: it is a Python projec
 vitest run and npm workspaces all leave `invisible_engine_dots/` out
 (`tests/repo/vendored-nanobot.test.ts` checks it). It is a hard fork: it is
 changed in place and upstream changes are never merged. `dot-agentd`
-is a Go module. Node 24 or newer for the TypeScript (the earlier guest agent
-uses the built-in `node:sqlite`). Go 1.25 or newer. Python 3.11 or newer for
+is a Go module. Node 24 or newer for the TypeScript. Go 1.25 or newer. Python 3.11 or newer for
 the engine; the guest runs it on Ubuntu 24.04's CPython 3.12.
 
 The control plane runs as ONE process (`invisible-dots server`) that composes
@@ -866,11 +867,13 @@ guest's report: it is never used to enforce anything (the cap is the guest's).
 
 `mcp.server.added {arguments}` is a call of `add_mcp_server` that ran (section 8.3): the Dot adds an MCP server to its
 own config, and `arguments` are the call's, as the model made it. The config is the host's, so the host decides
-again: it writes the server only when the Dot's config allows `mcp.servers.add`, or when the person approved a call
-of exactly these arguments (an approval of the Dot with that tool, compared key by key in any order), and only when
-the entry passes the config's own schema under a name not yet declared. It writes it in the transaction that stores
-the event, with `dot.updated {name, mcp_server_added}`, and pushes the config; otherwise it logs
-`mcp.server.refused {name, reason}`. The server's own permission is left to its default, ask.
+again: it writes the server only when the entry passes the config's own schema under a name not yet declared, and
+the Dot's config allows `mcp.servers.add` or the person approved a call of exactly these arguments (an approval of the
+Dot with that tool, its arguments equal as JSON values, keys in any order). That approval is used up in the same
+transaction (`approvals.used_at`), so one approval adds one server once: a server the person removes is not brought
+back by the call that added it. It writes the server in the transaction that stores the event, with `dot.updated
+{name, mcp_server_added, approval_id?}`, and pushes the config; otherwise it logs `mcp.server.refused {name, reason}`
+(a call refused for its entry or its name keeps its approval). The server's own permission is left to its default, ask.
 
 `memory.updated {conversations, changed}` ends a memory pass (section 8.6): the
 Dot had been quiet for a while, and the summary model rewrote its `MEMORY.md`
@@ -914,7 +917,9 @@ The control plane adds its own: `dot.created`, `dot.updated` (a saved config,
 `{name}`, or a Dot that went to ERROR, `{name, status: "ERROR", error}`, which
 the Activity page tells apart), `dot.deleted`,
 `computer.state {state}`, `computer.started`, `computer.stopped`,
-`task.created`, `task.cancelled`, `approval.resolved {approval_id, decision,
+`task.created`, `task.cancelled`, `task.failed {task_id, error}` (the guest's
+type: the host writes it when it gives a task up because its `task.created` could not
+be delivered, section 9.2, so a client follows one type whoever ended the task), `approval.resolved {approval_id, decision,
 task_id?, note?, always?}` (`task_id` is the task the approval was asked in, so
 the events of a task hold the answer beside the request), and the two of a messaging
 channel: `channel.status {kind, status, detail?}` (`kind` is `telegram` or
@@ -1895,7 +1900,8 @@ published after COMMIT: the Dot or its computer changing state (`dot.created`
 with its rows, `computer.state` and `computer.started` with the process and the
 images, `computer.stopped` with the stopped state and the Dot's status,
 `dot.deleted` with the deletion, `dot.updated` with the saved config, ERROR with
-`dot.updated`), a task (`task.created`), an answer (`approval.resolved`, and
+`dot.updated`), a task (`task.created`, `task.cancelled`, and the `task.failed` of a task
+whose delivery the host gives up), an answer (`approval.resolved`, and
 the `dot.updated` of "always allow"), and what a channel reports or the person
 does to it (`channel.status`, `channel.changed`, `channel.peer.paired`). A
 control plane killed between two writes therefore leaves the state it was in
@@ -1963,15 +1969,17 @@ event never overtakes an earlier one:
   reached the guest: it is sent again with the same id, which the guest
   ignores if it has it, and it never counts as a failure. Only failures
   with a known outcome count: the guest refused the event (it is dropped),
-  or nothing listened. After 3 such failures a `task.created` gives its task
-  up as FAILED; a message or a decision is never given up and waits for the
-  next READY.
+  or nothing listened. After 3 such failures, or one refusal, a `task.created`
+  gives its task up as FAILED, logged as `task.failed` in the same transaction
+  (a task cancelled meanwhile stays cancelled); a message or a decision is never
+  given up and waits for the next READY.
 
 ### 9.3 Lifecycles
 
-VM states: `PROVISIONING, STARTING, RUNNING, IDLE, STOPPING, STOPPED, ERROR, DELETING`.
+VM states: `PROVISIONING, STARTING, RUNNING, STOPPING, STOPPED, ERROR, DELETING`.
 
-Dot states: `CREATING, READY, IDLE, RUNNING, WAITING_APPROVAL, ERROR, DISABLED`.
+Dot states: `CREATING, READY, IDLE, RUNNING, WAITING_APPROVAL, ERROR`. A Dot whose
+computer sleeps is IDLE and its computer STOPPED: there is no idle state of a VM.
 
 Task states: `PENDING, RUNNING, WAITING_APPROVAL, COMPLETED, FAILED, CANCELLED`.
 
@@ -2022,7 +2030,7 @@ Dot sleeps, so the host starts the computer for them. The guest reports, with
 `automation.next_run` (section 5.4), when its earliest enabled automation is due,
 and the host keeps it in `computers.next_automation_at`. The scheduler's pass
 (every `dispatchIntervalMs`, 5 s) starts every STOPPED computer that the person did not stop (below) and whose Dot is not
-in ERROR, DISABLED or CREATING and whose next automation is due within the
+in ERROR or CREATING and whose next automation is due within the
 wake lead time (`lifecycle.automationWakeLeadMs`, 90 s by default: a start
 reaches READY with some to spare) or is already past, a run missed while the
 host or the computer was down, which the guest makes as it starts. The same

@@ -49,12 +49,17 @@ export class SecretsRepository {
 
   /** The values of the secrets a Dot's MCP servers name that are set, by server and name (a server with none set is absent). */
   async mcpSecrets(dotId: string, servers: McpSecretNames): Promise<Record<string, Record<string, string>>> {
+    const named = Object.entries(servers).flatMap(([server, { secrets }]) => secrets.map((name) => ({ server, name, stored: mcpSecretName(server, name) })));
+    if (named.length === 0) return {};
+    const { rows } = await this.q.query<{ name: string; value_enc: Uint8Array }>(
+      "SELECT name, value_enc FROM secrets WHERE scope = $1 AND name = ANY($2::text[])",
+      [dotId, named.map((n) => n.stored)],
+    );
+    const stored = new Map(rows.map((row) => [row.name, row.value_enc]));
     const values: Record<string, Record<string, string>> = {};
-    for (const [server, { secrets }] of Object.entries(servers)) {
-      for (const name of secrets) {
-        const value = await this.get(dotId, mcpSecretName(server, name));
-        if (value !== null) (values[server] ??= {})[name] = value;
-      }
+    for (const { server, name, stored: key } of named) {
+      const sealed = stored.get(key);
+      if (sealed !== undefined) (values[server] ??= {})[name] = this.box.decrypt(sealed, aad(dotId, key));
     }
     return values;
   }

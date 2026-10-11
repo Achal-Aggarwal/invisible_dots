@@ -93,12 +93,6 @@ export class InboundRepository {
     return rows.map(toRecord);
   }
 
-  /** Whether anything still has to reach the Dot's guest. */
-  async hasPending(dotId: string): Promise<boolean> {
-    const { rows } = await this.q.query(`SELECT 1 FROM inbound_events WHERE dot_id = $1 AND ${PENDING} LIMIT 1`, [dotId]);
-    return rows.length > 0;
-  }
-
   /**
    * Dots with a pending row that may be tried again now: it has failed fewer
    * than `maxFailures` times and its retry time has come. A row that used up
@@ -139,14 +133,15 @@ export class InboundRepository {
     return "skip";
   }
 
-  /** The guest accepted the event (202); a task.created also marks its run delivered. */
+  /** The guest accepted the event (202); a task.created also marks its run delivered, in the same statement. */
   async markDelivered(id: string): Promise<void> {
-    const { rows } = await this.q.query<{ run_id: string | null }>(
-      "UPDATE inbound_events SET delivered_at = now(), last_error = NULL, retry_at = NULL WHERE id = $1 RETURNING run_id",
+    await this.q.query(
+      `WITH delivered AS (
+         UPDATE inbound_events SET delivered_at = now(), last_error = NULL, retry_at = NULL WHERE id = $1 RETURNING run_id
+       )
+       UPDATE task_runs r SET delivered_at = COALESCE(r.delivered_at, now()) FROM delivered d WHERE r.id = d.run_id`,
       [id],
     );
-    const runId = rows[0]?.run_id;
-    if (runId) await this.q.query("UPDATE task_runs SET delivered_at = COALESCE(delivered_at, now()) WHERE id = $1", [runId]);
   }
 
   /** A failed send whose outcome is known; returns how many such failures the row has now. */

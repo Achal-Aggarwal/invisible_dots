@@ -10,13 +10,12 @@ export interface ComposerState {
 
 /**
  * A message is accepted whenever the Dot exists: the control plane stores it and delivers it once the computer is
- * up (`delivery: "queued"`), waking it if it sleeps. So the person is stopped only for a Dot that will not answer
- * (disabled) or no longer exists (being deleted), and told in a sentence when the answer will take a while.
+ * up (`delivery: "queued"`), waking it if it sleeps. So the person is stopped only for a Dot that is being deleted,
+ * and told in a sentence when the answer will take a while.
  */
 export function composerState(dot: Pick<Dot, "status" | "computer_state"> | undefined): ComposerState {
   if (dot === undefined) return { blocked: null, hint: null };
   if (dot.computer_state === "DELETING") return { blocked: "This Dot is being deleted.", hint: null };
-  if (dot.status === "DISABLED") return { blocked: "This Dot is disabled, so it does not answer.", hint: null };
   switch (dot.computer_state) {
     case "PROVISIONING":
     case "STARTING":
