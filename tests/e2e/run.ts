@@ -262,15 +262,18 @@ async function hashTask(what: string, command: string): Promise<string> {
 
 /**
  * Searches the guest's whole system journal for the key's prefix, inside the
- * guest, without giving the model any part of the key. The Dot's own exec
- * tool runs the command, so the journal is read as the user the model's
- * commands run as; the answer is the hash of "<count> <nonce>", which only
- * the command itself can produce for a count of 0.
+ * guest. The command runs through dot-agentd's /v1/exec, the route the Dot's
+ * exec tool runs commands through, so the journal is read as the user the
+ * model's commands run as; the model itself is not asked, since a careful one
+ * may refuse to search a machine's logs for keys. The answer is the hash of
+ * "<count> <nonce>", which only the whole command can produce for a count of 0.
  */
 async function assertJournalClean(prefix: string, what: string): Promise<void> {
   const nonce = randomBytes(8).toString("hex");
-  const hash = await hashTask("journal", journalCountCommand(prefix, nonce));
-  assert(hash === journalCleanHash(nonce), `the guest journal holds ${what}, or the journal could not be read in full`);
+  const read = await guestExec(state.dotId!, journalCountCommand(prefix, nonce), 2 * MINUTE);
+  assert(read.exit_code === 0, `the guest journal could not be read in full: ${read.stderr.trim()}`);
+  const hash = /\b[0-9a-f]{64}\b/.exec(read.stdout)?.[0];
+  assert(hash === journalCleanHash(nonce), `the guest journal holds ${what}`);
 }
 
 // Stopping, starting and killing a computer

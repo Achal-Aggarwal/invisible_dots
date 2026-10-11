@@ -70,8 +70,9 @@ no permission, and ask the engine for its state through the proxy.
 The key checks report only "found" or "not found" and where, never any part
 of the key. They look for its first 12 characters; the journal check of step j
 looks inside the guest for the `sk-or-` prefix every OpenRouter key has (the run
-refuses a key without it), without giving the model any part of the key, and is
-only accepted when the guest proves it read the system journal. Large rows are
+refuses a key without it), as the user the model's commands run as (through
+dot-agentd's exec route, not by asking the model, which may refuse to search
+logs for keys), and is only accepted when the guest proves it read the system journal. Large rows are
 compressed inside the database's files, which is why step n reads them through
 the API as well as step p scanning the files. The guest's journal compresses
 large entries too, which is why step j reads it inside the guest besides step n
