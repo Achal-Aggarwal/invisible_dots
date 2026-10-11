@@ -29,7 +29,7 @@ start_fake_openrouter
 DOT_UID=$(id -u dot)
 install -d -o dot -g dot -m 0700 "/run/user/$DOT_UID"
 install -D -m 0755 "$RUNTIME/dot-desktop.sh" /opt/invisible-dots/bin/dot-desktop
-su -s /bin/bash dot -c "HOME=/home/dot DISPLAY=:0 DOT_SCREEN=1920x1080x24 PATH=$GUEST_PATH /opt/invisible-dots/bin/dot-desktop" > /tmp/desktop.log 2>&1 &
+su -s /bin/bash dot -c "HOME=/home/dot DISPLAY=:0 DOT_SCREEN=1920x1080x24 PATH=$DOT_PATH /opt/invisible-dots/bin/dot-desktop" > /tmp/desktop.log 2>&1 &
 wait_display() { for _ in $(seq 1 60); do [ -S /tmp/.X11-unix/X0 ] && pgrep -u dot -x xfwm4 >/dev/null && return 0; sleep 1; done; return 1; }
 check "the desktop is up: Xvfb on :0 and an XFCE session with its window manager, all dot's" "wait_display && pgrep -u dot -x Xvfb >/dev/null && ! pgrep -u root -x Xvfb >/dev/null"
 
@@ -83,7 +83,7 @@ unset MCP_COMMAND
 start_guest_daemons
 init_host_side
 check "the engine answers /health through dot-agentd" "wait_health"
-check "invisible-playwright-mcp is on dot's PATH, where the golden image links it" "[ \"\$(su -s /bin/bash dot -c 'PATH=$GUEST_PATH command -v invisible-playwright-mcp')\" = /home/dot/.local/bin/invisible-playwright-mcp ]"
+check "invisible-playwright-mcp is on dot's PATH, where the golden image links it" "[ \"\$(su -s /bin/bash dot -c 'PATH=$DOT_PATH command -v invisible-playwright-mcp')\" = /home/dot/.local/bin/invisible-playwright-mcp ]"
 reset_config
 echo '{"computer.exec":"allow","computer.screenshot":"allow","browser.identity.list":"allow","browser.identity.create":"allow","browser.identity.delete":"allow","browser.identity.launch":"allow","browser.identity.close":"allow","browser.navigate":"allow","browser.read":"allow","browser.act":"allow"}' > /tmp/perms.json
 write_push_script

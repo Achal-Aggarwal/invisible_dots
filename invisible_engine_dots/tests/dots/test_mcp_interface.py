@@ -41,12 +41,14 @@ def test_it_was_captured_from_a_server_started_as_the_engine_starts_it() -> None
 
 
 def test_the_capture_holds_the_sentences_a_tool_answers_instead_of_working() -> None:
-    """The engine closes an identity on these whole sentences (browser.py `_BROWSER_LOST`): the capture records them
-    from the package's own constants, so a version that rewords them changes this file and the engine with it."""
+    """The engine closes an identity on these whole sentences (browser.py `_BROWSER_LOST`) and knows a browser opened
+    by the first (`_OPENED`): the capture records them from the package's own constants, so a version that rewords
+    them changes this file and the engine with it."""
     assert SERVER_INTERFACE["browser"] == "main"
     for answer in ("not_open", "gone"):
         sentence = SERVER_INTERFACE["answers"][answer]
         assert sentence.count("%s") == 1 and "browser_open" in sentence, answer
+    assert SERVER_INTERFACE["answers"]["opened"] % "main" == "the main browser is open."
 
 
 def test_the_capture_holds_the_servers_tools_with_their_descriptions_and_schemas() -> None:

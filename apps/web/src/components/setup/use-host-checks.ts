@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { api } from "../../lib/api";
 import { isReady, preflightItems, type HealthResult, type HostResult, type PreflightItem } from "../../lib/preflight";
 import { useResource } from "../ui";
-import { useShell } from "../shell/attention";
+import { useHealth } from "../shell/attention";
 
 export interface HostChecks {
   /** Null until both answers are in (or have failed). */
@@ -27,7 +27,7 @@ function reason(error: unknown): string {
  * still not ready, the checks run again by themselves.
  */
 export function useHostChecks(): HostChecks {
-  const { health } = useShell();
+  const health = useHealth();
   const doctor = useResource(() => api.doctor(), "host:doctor");
 
   const healthResult: HealthResult | null = health.error !== null ? { error: reason(health.error) } : health.data ? { health: health.data } : null;

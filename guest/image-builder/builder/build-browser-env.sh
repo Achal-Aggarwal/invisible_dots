@@ -7,8 +7,8 @@
 #
 #   build-browser-env.sh <lock> <environment directory>
 #
-# The command is linked into ~dot/.local/bin, which the units put on the PATH of dot-agentd and
-# of the engine.
+# The command is linked into ~dot/.local/bin, where the model's commands find it; the engine's unit names
+# it by that path (INVISIBLE_DOTS_MCP_COMMAND) and starts it as dot.
 #
 # The lock is a hashed list of every package at an exact version (uv pip install
 # --require-hashes), so a file that changed on the index, or a dependency missing from the

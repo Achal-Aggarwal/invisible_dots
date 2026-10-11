@@ -144,7 +144,7 @@ async def _serve() -> None:
                 )
             state["open"] = True
             remember(role)
-            return text(f"the {role} browser is open. seed: remembered by the profile")
+            return text(interface["answers"]["opened"] % role + " seed: remembered by the profile")
         if name == "browser_close":
             if control.get("refuse_close"):
                 return text(f"the {role} browser could not be closed", error=True)

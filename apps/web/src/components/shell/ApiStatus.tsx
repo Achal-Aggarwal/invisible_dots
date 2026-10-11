@@ -3,19 +3,19 @@
 import { ServerIcon } from "lucide-react";
 import Link from "next/link";
 import { cn } from "../../lib/utils";
-import { useShell } from "./attention";
+import { useHealth } from "./attention";
 import { StatusIcon } from "./StatusIcon";
 
 type ApiState = "checking" | "ok" | "down";
 
 function useApiState(): ApiState {
-  const { health } = useShell();
+  const health = useHealth();
   return health.error !== null ? "down" : health.data ? "ok" : "checking";
 }
 
 /** Whether the control plane answers through the proxy, with its version (the shell asks every 30 seconds): an icon, said in full on hover. */
 export function ApiStatus() {
-  const { health } = useShell();
+  const health = useHealth();
   const state = useApiState();
   const label = state === "checking" ? "API: checking" : state === "ok" ? "API: ok" : "API: unreachable";
   const version = state === "ok" && health.data ? `v${health.data.version}` : null;
@@ -30,7 +30,7 @@ export function ApiStatus() {
 
 /** While the control plane has no OpenRouter key: a link to where it is entered, on a line of its own under the statuses. */
 export function MissingKeyNotice({ onNavigate }: { onNavigate?: () => void }) {
-  const { health } = useShell();
+  const health = useHealth();
   const state = useApiState();
   if (state !== "ok" || !health.data || health.data.openrouter_configured) return null;
   return (

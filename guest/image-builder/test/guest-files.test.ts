@@ -235,14 +235,24 @@ describe("guest units", () => {
     return lines[0]!.slice("Environment=PATH=".length).split(":");
   };
 
-  it.each(GUEST_UNITS.filter((name) => name !== "dot-agentd.service"))("%s runs with the display and uv's bin dir, as its own user", (name) => {
+  it.each(GUEST_UNITS.filter((name) => name !== "dot-agentd.service"))("%s runs with the display, as its own user", (name) => {
     const unit = text(unitAsset(name));
     expect(unit).toMatch(new RegExp(`^User=${UNIT_USER[name]}$`, "m"));
     expect(unit).toMatch(/^Environment=DISPLAY=:0$/m);
-    expect(unitPath(name)[0]).toBe("/home/dot/.local/bin");
     expect(unit).toMatch(/^RequiresMountsFor=\/opt\/invisible-dots$/m);
     expect(unit).toMatch(/^Restart=on-failure$/m);
     expect(unit).toMatch(/^WantedBy=multi-user\.target$/m);
+  });
+
+  it("runs the desktop, which is dot's, with uv's bin dir first", () => {
+    expect(unitPath("dot-desktop.service")[0]).toBe("/home/dot/.local/bin");
+  });
+
+  it("runs the engine, which holds the key, with a PATH of system directories only, and names the browser's server by its path", () => {
+    // Nothing the engine runs by name may come from a directory dot (the model) can write. The browser's MCP server
+    // is dot's (build-browser-env.sh links it into ~dot/.local/bin): the unit names it, and the engine starts it as dot.
+    for (const dir of unitPath("invisible-dots-agent.service")) expect(dir, `PATH entry ${dir}`).toMatch(/^\/(usr\/local\/|usr\/)?s?bin$/);
+    expect(text(unitAsset("invisible-dots-agent.service"))).toMatch(/^Environment=INVISIBLE_DOTS_MCP_COMMAND=\/home\/dot\/\.local\/bin\/invisible-playwright-mcp$/m);
   });
 
   it("runs dot-agentd with the display, as its own user, and a PATH of system directories only", () => {

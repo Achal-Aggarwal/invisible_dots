@@ -26,8 +26,6 @@ const HEALTH_INTERVAL_MS = 30_000;
 interface ShellData {
   dots: Resource<Dot[]>;
   approvals: Resource<Approval[]>;
-  /** The control plane's answer, asked every 30 seconds and again on `health.reload()` (after a key is saved). */
-  health: Resource<HealthResponse>;
   attention: ReadonlyMap<string, DotAttention>;
   /** What needs the person, across every Dot: waiting approvals, Dots in ERROR, failed tasks and channels to link again. The number on the rail's Inbox entry. */
   needsYou: number;
@@ -42,6 +40,7 @@ interface ShellData {
 }
 
 const Context = createContext<ShellData | null>(null);
+const HealthContext = createContext<Resource<HealthResponse> | null>(null);
 
 /**
  * What every page of the app shares: the Dots, the approvals that wait, the tasks that failed lately, the channels that
@@ -118,10 +117,22 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
 
   const dismiss = useCallback((dotId: string) => setLive((current) => dismissRestart(current, dotId)), []);
   const value = useMemo<ShellData>(
-    () => ({ dots, approvals, health, attention, needsYou, failedTasks, relinks, dismissFailedTask, live, dismissRestart: dismiss }),
-    [dots, approvals, health, attention, needsYou, failedTasks, relinks, dismissFailedTask, live, dismiss],
+    () => ({ dots, approvals, attention, needsYou, failedTasks, relinks, dismissFailedTask, live, dismissRestart: dismiss }),
+    [dots, approvals, attention, needsYou, failedTasks, relinks, dismissFailedTask, live, dismiss],
   );
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  // The health is a context of its own: its poll every 30 seconds re-renders what reads it, not every user of the shell.
+  return (
+    <HealthContext.Provider value={health}>
+      <Context.Provider value={value}>{children}</Context.Provider>
+    </HealthContext.Provider>
+  );
+}
+
+/** The control plane's answer, asked every 30 seconds and again on `reload()` (after a key is saved). */
+export function useHealth(): Resource<HealthResponse> {
+  const value = useContext(HealthContext);
+  if (!value) throw new Error("useHealth must be used inside AttentionProvider");
+  return value;
 }
 
 export function useShell(): ShellData {
