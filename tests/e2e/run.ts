@@ -891,8 +891,12 @@ async function main(): Promise<void> {
     const done = await waitTask(task.id);
     const all = await events(dotId);
     const calls = toolCalls(all, task.id, "exec");
-    assert(calls.some((e) => e.data.interrupted === true && e.data.ok === false), `no interrupted exec event for the task (tools: ${describeTools(all, task.id)})`);
-    assert(calls.length === 1, `exec was called ${calls.length} times in the task, not once (tools: ${describeTools(all, task.id)})`);
+    const interrupted = calls.find((e) => e.data.interrupted === true && e.data.ok === false);
+    assert(interrupted, `no interrupted exec event for the task (tools: ${describeTools(all, task.id)})`);
+    // The command was not run again: no other call of it. The model may run other commands (it may look whether the
+    // marker is there, which is how a careful one checks); what must never happen is the same command a second time.
+    const again = calls.filter((e) => e !== interrupted && e.data.target === interrupted.data.target);
+    assert(again.length === 0, `the interrupted command was called again ${again.length} time(s) (tools: ${describeTools(all, task.id)})`);
     // The command died with the computer and nothing ran it again: once its 8 seconds would be over, no sleep is left and the marker was never written.
     await sleep(10_000);
     const after = await guestExec(dotId, `pgrep -u dot -f 'sleep [8]' >/dev/null && echo running || (wc -l < ${marker} 2>/dev/null || echo 0)`);
