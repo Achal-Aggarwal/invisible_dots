@@ -420,10 +420,16 @@ settings next to its server or with
 key; `--clear` removes it): it reaches the server as an environment variable or
 a header, never through the YAML or a command line.
 
-Only you add a server. The Dot can install the program one needs: `uvx` is
-there; for `npx`, it runs `sudo dot-install nodejs npm`. A server that cannot
-start says why, in its settings, in `invisible-dots mcp <dot>` and to the Dot
-itself, and it is started again when the Dot's next message or task begins.
+The Dot can add a server itself, as NanoClaw's agents can: it installs the
+program (`uvx`, which is there, or from GitHub with `uv tool install
+git+https://...`; for `npx` it runs `sudo dot-install nodejs npm`), then calls
+`add_mcp_server`. That asks you first (`mcp.servers.add`): the approval shows
+what the server runs or where it is, the secrets you will set, and why; approved,
+the server is in the Dot's settings and its tools are the Dot's from its next
+message, each asking you until you allow it. Only you change or remove a server.
+A server that cannot start says why, in its settings, in `invisible-dots mcp <dot>`
+and to the Dot itself, and it is started again when the Dot's next message or task
+begins.
 
 ## Talk to it from your phone
 

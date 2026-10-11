@@ -815,7 +815,7 @@ text, spent_usd?}`, `task.completed {task_id, summary, spent_usd?}`,
 reason}`, `tool.called {task_id?, tool, permission, decision, ok,
 duration_ms, target?, tty?, interrupted?}`, `browser.identity.created|deleted|launched|closed
 {identity_id, name}`, `automation.next_run {next_run_at_ms}`,
-`memory.updated {conversations, changed, spent_usd?}`.
+`memory.updated {conversations, changed, spent_usd?}`, `mcp.server.added {arguments}`.
 `interrupted: true` marks a call
 the engine stopped during: its outcome is unknown and it was not run again, so
 `ok` is false and `duration_ms` is 0. `tty: true` marks a call that started a
@@ -863,6 +863,14 @@ passes spent since the last one, a pass that failed included (section 8.6). The
 engine always sends it (0 when nothing was spent); the schema makes it optional
 so events logged before it existed stay valid. The host reads it as the
 guest's report: it is never used to enforce anything (the cap is the guest's).
+
+`mcp.server.added {arguments}` is a call of `add_mcp_server` that ran (section 8.3): the Dot adds an MCP server to its
+own config, and `arguments` are the call's, as the model made it. The config is the host's, so the host decides
+again: it writes the server only when the Dot's config allows `mcp.servers.add`, or when the person approved a call
+of exactly these arguments (an approval of the Dot with that tool, compared key by key in any order), and only when
+the entry passes the config's own schema under a name not yet declared. It writes it in the transaction that stores
+the event, with `dot.updated {name, mcp_server_added}`, and pushes the config; otherwise it logs
+`mcp.server.refused {name, reason}`. The server's own permission is left to its default, ask.
 
 `memory.updated {conversations, changed}` ends a memory pass (section 8.6): the
 Dot had been quiet for a while, and the summary model rewrote its `MEMORY.md`
@@ -1163,12 +1171,18 @@ every permission the registry knows, defaults applied. The guest applies the
 map as it is and denies a permission missing from it, so the defaults live in
 one place (`resolvePermission` in `packages/shared`).
 
-`mcp_servers` are the MCP servers the person lets the Dot use, declared the way
+`mcp_servers` are the MCP servers the Dot may use, declared the way
 Claude Code (`.mcp.json`), Codex (`[mcp_servers]`) and nanobot declare them: a
-`command` with its `args` and `env`, or a `url` with its `headers`. Only the
-person declares one; the Dot can install the program a server needs (section
-4.2), as it installs anything, but it cannot add a server to its own config,
-which would let it give itself tools. A server's name is the prefix of its tools
+`command` with its `args` and `env`, or a `url` with its `headers`. The person
+declares one in the settings or the YAML, and the Dot can add one itself, as
+NanoClaw's agents can (`add_mcp_server`, section 8.3), once it has installed the
+program the server needs (section 4.2): its permission, `mcp.servers.add`, asks
+by default, the person reads the whole entry on the approval, and the host checks
+that approval again before it writes the server (section 5.4). A stdio server
+runs as `dot`, with what `computer.exec` already gives the Dot, so adding one
+gives the Dot no new power over its computer: what it adds are tools, and each
+asks under the server's own permission until the person allows it. Only the
+person changes or removes a server. A server's name is the prefix of its tools
 as the model sees them, `mcp_<server>_<tool>` (nanobot's naming), so it holds no
 `_` and the engine reads the server back from a tool's name. `secrets` names the
 environment variables (of a command) or headers (of a URL) whose values are
@@ -1290,6 +1304,7 @@ does not know.
 | `browser_press_key` | `browser.act` | the server's: presses a key or a shortcut |
 | `browser_select_option` | `browser.act` | the server's: chooses an option by its label or its value |
 | `browser_upload_files` | `browser.act` | the server's: attaches files of the dot user to a file field |
+| `add_mcp_server` | `mcp.servers.add` | adds an MCP server to the Dot's own config: `name`, a `command` with `args` and `env` or a `url` with `headers`, the names of its `secrets`, and a `reason` for the person; the host checks the permission again and writes it (section 7) |
 
 The page tools are `invisible-playwright-mcp`'s, the only browser of a Dot,
 offered as an MCP host offers a server's tools: the server's name, description
