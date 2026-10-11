@@ -23,6 +23,10 @@ bin/
 # vitest's JSON report, as CI and the pre-push hook write it
 vitest-report.json
 
+# The benchmark's tasks: tests/bench/run.sh writes them with author.py and author_long.py before every run
+/tests/bench/tasks/
+/tests/bench/tasks-long/
+
 # Editor and Python leftovers of the gates
 __pycache__/
 .venv/

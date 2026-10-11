@@ -1,5 +1,0 @@
-cc: <team.lead@acme.io>
-cc: <anna@acme.io>
-Write to info@acme.io for details.
-Write to marco@Example.COM for details.
-not-an-email@ and @nobody here

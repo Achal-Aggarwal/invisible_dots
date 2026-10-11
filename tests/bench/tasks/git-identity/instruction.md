@@ -1,1 +1,0 @@
-Set up git for your user on this computer: the name `Dot Bench`, the email `dot@bench.example`, `main` as the default branch of new repositories, and an alias `git last` that shows the last commit (`log -1 HEAD`).

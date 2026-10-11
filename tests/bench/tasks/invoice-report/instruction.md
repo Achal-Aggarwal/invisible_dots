@@ -1,1 +1,0 @@
-`/app/invoices` holds invoices as JSON. Write `/app/report.md`: a Markdown table with the columns `Client` and `Total`, one row per client with the sum of `quantity * unit_price` over all of that client's invoices, rounded to 2 decimals, the largest total first, then a last row `TOTAL` with the sum of all.

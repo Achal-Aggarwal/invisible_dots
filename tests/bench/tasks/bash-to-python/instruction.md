@@ -1,1 +1,0 @@
-`/app/summary.sh` prints a summary of a CSV file. Rewrite it in Python as `/app/summary.py` with exactly the same output for any CSV file of the same columns: `python3 /app/summary.py FILE` must print what `bash /app/summary.sh FILE` prints. Keep `summary.sh`.

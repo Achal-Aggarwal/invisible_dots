@@ -32,7 +32,9 @@ which is how such a task is found: **a task counts only once its oracle scores
 `tasks/` holds our own suite, 25 tasks written by `author.py` (run it with
 the directory to write to; the data is generated with a fixed seed and the
 expected answers are computed there, never by the agent). Each grader is
-`tests/grade.py`, run by `tests/test.sh`.
+`tests/grade.py`, run by `tests/test.sh`. Neither `tasks/` nor `tasks-long/`
+is stored in the repository: `run.sh` writes both afresh before every run, so a
+run takes exactly what the generators write.
 
 | Category | Tasks |
 |---|---|

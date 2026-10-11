@@ -1,9 +1,0 @@
-(marco@Example.COM), thanks
-(marco@mail.co.uk), thanks
-cc: <info@example.com>
-cc: <j_smith@example.com>
-Contact: team.lead@mail.co.uk.
-(team.lead@mail.co.uk), thanks
-Contact: anna@example.com.
-Write to support@example.com for details.
-not-an-email@ and @nobody here
