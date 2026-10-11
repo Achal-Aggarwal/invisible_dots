@@ -350,7 +350,12 @@ export class FakeGuest implements GuestApi {
   }
 
   /** Ask for an approval from inside a task, as the policy engine does on `ask`. */
-  requestApproval(taskId: string | undefined, tool = "browser_identity_delete", permission: PermissionName = "browser.identity.delete"): string {
+  requestApproval(
+    taskId: string | undefined,
+    tool = "browser_identity_delete",
+    permission: PermissionName = "browser.identity.delete",
+    args: Record<string, unknown> = { identity_id: "shop-abc123" },
+  ): string {
     const approvalId = newId("apr");
     this.emit("agent.state", { state: "WAITING_APPROVAL" });
     this.emit("approval.requested", {
@@ -358,7 +363,7 @@ export class FakeGuest implements GuestApi {
       ...(taskId ? { task_id: taskId } : {}),
       tool,
       permission,
-      arguments: { identity_id: "shop-abc123" },
+      arguments: args,
       reason: "the tool needs approval",
     });
     return approvalId;

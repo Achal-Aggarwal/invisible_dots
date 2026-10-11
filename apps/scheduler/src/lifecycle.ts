@@ -30,7 +30,7 @@ import {
   type VmState,
 } from "@invisible-dots/shared";
 import { guestErrorCode, guestErrorStatus, type ComputerDriver, type ComputerSpecInput, type ComputerState, type GuestApi } from "./driver.js";
-import { applyGuestEvent, dotStatusForAgent } from "./guest-events.js";
+import { applyGuestEvent, dotStatusForAgent, type AppliedGuestEvent } from "./guest-events.js";
 import { ControlPlaneError, errorMessage, KeyedMutex, sleep, type Clock, type Logger } from "./support.js";
 
 export interface LifecycleOptions {
@@ -772,15 +772,29 @@ export class Lifecycle {
   /** Store and apply one guest event; exported for recovery tools and tests. */
   async handleGuestEvent(dotId: string, event: OutboundEvent): Promise<StoredEvent | null> {
     const now = this.#clock.now();
-    const { stored, applied } = await this.#db.transaction(async (tx) => {
+    const { stored, applied, logged } = await this.#db.transaction(async (tx) => {
       // The event first: its insert takes the event-order lock (events.ts).
       const stored = await this.#events.appendGuest(tx, dotId, event);
       await tx.computers.advanceCursor(dotId, event.seq, now);
-      const applied = stored ? await applyGuestEvent(tx, dotId, event) : { taskSettled: false };
-      return { stored, applied };
+      const applied: AppliedGuestEvent = stored ? await applyGuestEvent(tx, dotId, event) : { taskSettled: false };
+      const logged: StoredEvent[] = [];
+      for (const host of applied.hostEvents ?? []) logged.push(await this.#events.appendHostIn(tx, dotId, host.type, host.data));
+      return { stored, applied, logged };
     });
     if (stored) this.#events.publish(stored);
+    for (const event of logged) this.#events.publish(event);
     if (applied.taskSettled) this.#onWorkPossible();
+    if (applied.reconfigured) {
+      // The Dot added an MCP server to its config: the guest gets the config (and the secrets it names) now.
+      this.#runInBackground("pushing the config with the MCP server the Dot added", dotId, async () => {
+        try {
+          await this.syncGuest(dotId);
+        } catch (error) {
+          this.markSuspect(dotId);
+          throw error;
+        }
+      });
+    }
     if (stored && event.type === "agent.started") {
       // The agent process restarted inside a running VM: it lost the key it keeps in memory.
       this.#runInBackground("pushing the key again after an agent restart", dotId, async () => {

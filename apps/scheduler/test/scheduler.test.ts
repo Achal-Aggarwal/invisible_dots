@@ -1264,6 +1264,62 @@ describe.each(testAdapters())("Scheduler with a fake driver and a fake guest (%s
       ]);
     });
 
+    describe("a server the Dot adds itself (add_mcp_server)", () => {
+      const ARGS = { name: "clock", command: "uvx", args: ["mcp-server-time"], reason: "to tell the time" };
+      const refusals = async (dotId: string) => (await db.events.list({ dotId })).filter((e) => e.type === "mcp.server.refused").map((e) => e.data);
+
+      it("is written into the config when the person approved exactly these arguments, with its permission left to ask, and pushed", async () => {
+        const { scheduler, driver } = make();
+        const dot = await readyDot(scheduler, "mcp-self");
+        const guest = driver.guestOf(dot.id);
+        // The same arguments in another order: the person approved this entry, however the keys were written.
+        const id = guest.requestApproval(undefined, "add_mcp_server", "mcp.servers.add", { reason: "to tell the time", args: ["mcp-server-time"], command: "uvx", name: "clock" });
+        await waitFor(async () => (await db.approvals.get(id)) !== null, "the approval stored");
+        await scheduler.resolveApproval(id, "approve");
+
+        guest.emit("mcp.server.added", { arguments: ARGS });
+        await waitFor(async () => "clock" in ((await db.dots.get(dot.id))?.config.mcp_servers ?? {}), "the server in the config");
+        const config = (await db.dots.get(dot.id))!.config;
+        expect(config.mcp_servers.clock).toEqual({ command: "uvx", args: ["mcp-server-time"], env: {}, secrets: [], timeout_s: 120, startup_timeout_s: 60 });
+        expect(config.permissions).not.toHaveProperty("mcp.clock");
+        await waitFor(() => guest.config?.mcp_servers.clock !== undefined, "the config pushed to the guest");
+        expect((await db.events.list({ dotId: dot.id })).some((e) => e.type === "dot.updated" && e.data.mcp_server_added === "clock")).toBe(true);
+      });
+
+      it("is written without an approval when the person allowed mcp.servers.add", async () => {
+        const { scheduler, driver } = make();
+        const dot = await scheduler.createDot(`${yaml("mcp-allowed")}permissions:\n  mcp.servers.add: allow\n`);
+        await waitUntilSettledReady(scheduler, driver, dot.id, "mcp-allowed");
+        driver.guestOf(dot.id).emit("mcp.server.added", { arguments: { name: "web", url: "https://web.example/mcp", secrets: ["Authorization"], reason: "r" } });
+        await waitFor(async () => "web" in ((await db.dots.get(dot.id))?.config.mcp_servers ?? {}), "the server in the config");
+        expect((await scheduler.mcpSecrets(dot.id)).secrets).toEqual([{ server: "web", name: "Authorization", set: false }]);
+      });
+
+      it("is refused, and said, when nobody approved it, the permission is denied, the name is taken or the entry is not one", async () => {
+        const { scheduler, driver } = make();
+        const dot = await scheduler.createDot(`${yaml("mcp-refused")}mcp_servers:\n  taken:\n    command: uvx\n`);
+        await waitUntilSettledReady(scheduler, driver, dot.id, "mcp-refused");
+        const guest = driver.guestOf(dot.id);
+        guest.emit("mcp.server.added", { arguments: ARGS });
+        await waitFor(async () => (await refusals(dot.id)).length === 1, "the first refusal");
+        expect((await refusals(dot.id))[0]).toEqual({ name: "clock", reason: "mcp.servers.add asks, and no approval of exactly these arguments was given" });
+
+        await scheduler.updateDot(dot.id, `${yaml("mcp-refused")}permissions:\n  mcp.servers.add: allow\nmcp_servers:\n  taken:\n    command: uvx\n`);
+        guest.emit("mcp.server.added", { arguments: { name: "taken", command: "npx" } });
+        guest.emit("mcp.server.added", { arguments: { name: "both", command: "uvx", url: "https://a.example/mcp" } });
+        await waitFor(async () => (await refusals(dot.id)).length === 3, "two more refusals");
+        const [, taken, both] = await refusals(dot.id);
+        expect(taken).toEqual({ name: "taken", reason: 'the Dot\'s config already declares an MCP server "taken"' });
+        expect((both as { reason: string }).reason).toMatch(/MCP server is either/);
+
+        await scheduler.updateDot(dot.id, `${yaml("mcp-refused")}permissions:\n  mcp.servers.add: deny\nmcp_servers:\n  taken:\n    command: uvx\n`);
+        guest.emit("mcp.server.added", { arguments: ARGS });
+        await waitFor(async () => (await refusals(dot.id)).length === 4, "the denied one");
+        expect((await refusals(dot.id))[3]).toEqual({ name: "clock", reason: "the Dot's config denies mcp.servers.add" });
+        expect(Object.keys((await db.dots.get(dot.id))!.config.mcp_servers)).toEqual(["taken"]);
+      });
+    });
+
     it("always allowing the permission of a server the config no longer declares is refused, and nothing changes", async () => {
       const { scheduler, driver } = make();
       const dot = await scheduler.createDot(withServers("mcp-always", TIME));
