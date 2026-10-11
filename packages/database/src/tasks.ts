@@ -142,6 +142,15 @@ export class TasksRepository {
     return rows.map(toTask);
   }
 
+  /** The tasks of every Dot that ended in `status` after `after` (their `finished_at`), the latest end first. */
+  async listEnded(status: TaskState, after: Date, limit: number = TASK_LIST_LIMIT): Promise<TaskRecord[]> {
+    const { rows } = await this.q.query<TaskRow>(
+      "SELECT * FROM tasks WHERE status = $1 AND finished_at > $2 ORDER BY finished_at DESC, id DESC LIMIT $3",
+      [status, after, limit],
+    );
+    return rows.map(toTask);
+  }
+
   async runs(taskId: string): Promise<TaskRunRecord[]> {
     const { rows } = await this.q.query<TaskRunRow>(
       "SELECT * FROM task_runs WHERE task_id = $1 ORDER BY started_at, id",

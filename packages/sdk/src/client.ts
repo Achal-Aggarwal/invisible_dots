@@ -28,10 +28,12 @@ import type {
   ConversationMessage,
   CreateTaskRequest,
   DoctorAnswer,
+  DotChannelRecord,
   DotRecord,
   DotsAnswer,
   DotSummary,
   EventsAnswer,
+  EveryChannelAnswer,
   FilesListAnswer,
   HealthResponse,
   IdentitiesAnswer,
@@ -234,6 +236,11 @@ export class InvisibleDotsClient {
     return (await this.#json<TasksAnswer>("GET", `/api/dots/${enc(idOrName)}/tasks`, { query: { limit: page.limit, before: page.before } })).tasks;
   }
 
+  /** The tasks of every Dot that ended in `status` after `finishedAfter`, the latest end first. */
+  async endedTasks(status: "COMPLETED" | "FAILED" | "CANCELLED", finishedAfter: Date): Promise<TaskRecord[]> {
+    return (await this.#json<TasksAnswer>("GET", "/api/tasks", { query: { status, finished_after: finishedAfter.toISOString() } })).tasks;
+  }
+
   getTask(taskId: string): Promise<TaskRecord> {
     return this.#json("GET", `/api/tasks/${enc(taskId)}`);
   }
@@ -302,6 +309,11 @@ export class InvisibleDotsClient {
   /** The Dot's messaging channels with the people paired to each. Never a token. */
   async channels(idOrName: string): Promise<ChannelRecord[]> {
     return (await this.channelsOverview(idOrName)).channels;
+  }
+
+  /** Every channel of every Dot, each with its Dot's id. */
+  async everyChannel(): Promise<DotChannelRecord[]> {
+    return (await this.#json<EveryChannelAnswer>("GET", "/api/channels")).channels;
   }
 
   /** The Dot's channels and the kinds this server can run (WhatsApp is there only when the server was started with it). */

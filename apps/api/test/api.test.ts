@@ -547,6 +547,40 @@ describe.each(testAdapters())("control-plane API (%s)", (kind) => {
     expect(await get("limit=200&before=nobody")).toBe(200);
   });
 
+  it("every Dot in one read: the tasks that failed since a time, latest first, and every channel with its Dot", async () => {
+    const a = await readyDot("every-a");
+    const b = await readyDot("every-b");
+    const since = new Date(Date.now() - 1);
+    const failed = async (dotId: string, description: string) => {
+      const guest = driver.guestOf(dotId);
+      guest.onInbound = () => {};
+      const task = await api.createTask(dotId, { description });
+      await waitFor(async () => (await db.tasks.runs(task.id))[0]?.delivered_at, "delivered");
+      guest.emit("task.failed", { task_id: task.id, error: "boom" });
+      await waitFor(async () => (await api.getTask(task.id)).status === "FAILED", "failed");
+      return task.id;
+    };
+    const first = await failed(a.id, "first");
+    const second = await failed(b.id, "second");
+    const ours = (tasks: { id: string }[]) => tasks.map((t) => t.id).filter((id) => id === first || id === second);
+    expect(ours(await api.endedTasks("FAILED", since))).toEqual([second, first]);
+    expect(ours(await api.endedTasks("COMPLETED", since))).toEqual([]);
+    expect(await api.endedTasks("FAILED", new Date(Date.now() + 60_000))).toEqual([]);
+    const get = async (query: string) => (await fetch(`${base}/api/tasks?${query}`, { headers: { authorization: `Bearer ${TOKEN}` } })).status;
+    expect(await get("status=RUNNING&finished_after=2026-01-01T00:00:00Z")).toBe(400);
+    expect(await get("status=FAILED&finished_after=yesterday")).toBe(400);
+    expect(await get("status=FAILED")).toBe(400);
+
+    await channels.add(a.id, "telegram");
+    await channels.add(b.id, "telegram");
+    const every = (await api.everyChannel()).filter((c) => c.dot_id === a.id || c.dot_id === b.id);
+    expect(every.map((c) => [c.dot_id, c.kind])).toEqual([
+      [a.id, "telegram"],
+      [b.id, "telegram"],
+    ]);
+    expect(JSON.stringify(every)).not.toMatch(/token/i);
+  });
+
   it("messages: the newest page of a long conversation, and a cursor that goes back through the rest", async () => {
     const dot = await readyDot("chatty");
     for (const [index, word] of ["one", "two", "three"].entries()) {

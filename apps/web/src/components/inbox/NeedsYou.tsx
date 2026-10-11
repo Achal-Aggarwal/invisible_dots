@@ -220,22 +220,22 @@ export function NeedsYou({ filter }: { filter: Filter }) {
         </Section>
       ) : null}
 
-      {failedTasks.unread > 0 && otherThings ? (
+      {failedTasks.unreadable && otherThings ? (
         <Alert>
           <AlertCircleIcon />
-          <AlertTitle>Some failed tasks may be missing</AlertTitle>
+          <AlertTitle>Failed tasks may be missing</AlertTitle>
           <AlertDescription>
-            <p>The tasks of {failedTasks.unread === 1 ? "one Dot" : `${failedTasks.unread} Dots`} could not be read.</p>
+            <p>The tasks that failed today could not be read.</p>
           </AlertDescription>
         </Alert>
       ) : null}
 
-      {relinks.unread > 0 && otherThings ? (
+      {relinks.unreadable && otherThings ? (
         <Alert>
           <AlertCircleIcon />
-          <AlertTitle>Some channels may be missing</AlertTitle>
+          <AlertTitle>Channels may be missing</AlertTitle>
           <AlertDescription>
-            <p>The channels of {relinks.unread === 1 ? "one Dot" : `${relinks.unread} Dots`} could not be read.</p>
+            <p>The channels could not be read.</p>
           </AlertDescription>
         </Alert>
       ) : null}

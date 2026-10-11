@@ -6,8 +6,8 @@ import type { HealthResponse } from "@invisible-dots/sdk";
 import { api } from "../../lib/api";
 import { attentionByDot, needsYouCount, NO_ATTENTION, withTitlePrefix, type DotAttention } from "../../lib/attention";
 import { readDismissed, writeDismissed } from "../../lib/dismissed";
-import { loadRelinks, type ChannelRelink, type RelinkRead } from "../../lib/channels";
-import { loadFailedTasks, recentFailures, type FailedTasks } from "../../lib/failed-tasks";
+import { loadRelinks, type ChannelRelink } from "../../lib/channels";
+import { loadFailedTasks, recentFailures } from "../../lib/failed-tasks";
 import { applyLiveEvent, dismissRestart, dotIdFromPath, liveOf, markRead, type LiveDot, type LiveDots } from "../../lib/dot-live";
 import { faviconHref } from "../../lib/favicon";
 import type { Approval, Dot, Task } from "../../lib/types";
@@ -31,10 +31,10 @@ interface ShellData {
   attention: ReadonlyMap<string, DotAttention>;
   /** What needs the person, across every Dot: waiting approvals, Dots in ERROR, failed tasks and channels to link again. The number on the rail's Inbox entry. */
   needsYou: number;
-  /** Tasks that failed in the last 24 hours and are not dismissed, newest first; and how many Dots' tasks could not be read. */
-  failedTasks: { tasks: readonly Task[]; unread: number; loading: boolean };
-  /** Channels that need linking again, and how many Dots' channels could not be read. */
-  relinks: { items: readonly ChannelRelink[]; unread: number; loading: boolean };
+  /** Tasks that failed in the last 24 hours and are not dismissed, newest first; and whether they could not be read. */
+  failedTasks: { tasks: readonly Task[]; unreadable: boolean; loading: boolean };
+  /** Channels that need linking again; and whether they could not be read. */
+  relinks: { items: readonly ChannelRelink[]; unreadable: boolean; loading: boolean };
   /** Take a failed task out of the Inbox (remembered in this browser). */
   dismissFailedTask: (taskId: string) => void;
   live: LiveDots;
@@ -53,9 +53,8 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
   const dots = useResource(() => api.listDots(), "shell:dots");
   const approvals = useResource(() => api.listApprovals("pending"), "shell:approvals");
   const health = useResource(() => api.health(), "shell:health");
-  const dotIds = (dots.data ?? []).map((dot) => dot.id).join(",");
-  const failed = useResource<FailedTasks>(() => loadFailedTasks(api, dots.data ?? []), `shell:failed:${dotIds}`);
-  const channels = useResource<RelinkRead>(() => loadRelinks(api, dots.data ?? []), `shell:channels:${dotIds}`);
+  const failed = useResource<Task[]>(() => loadFailedTasks(api), "shell:failed");
+  const channels = useResource<ChannelRelink[]>(() => loadRelinks(api), "shell:channels");
   const reloadHealth = health.reload;
   useEffect(() => {
     const timer = setInterval(reloadHealth, HEALTH_INTERVAL_MS);
@@ -105,11 +104,11 @@ export function AttentionProvider({ children }: { children: ReactNode }) {
   }, []);
   // A failure leaves the Inbox a day after it happened, without anyone reloading anything.
   const now = Math.floor(useNow(60_000) / 60_000);
-  const recent = useMemo(() => recentFailures(failed.data?.tasks ?? [], dismissed, now * 60_000), [failed.data, dismissed, now]);
-  const failedTasks = useMemo(() => ({ tasks: recent, unread: failed.data?.unread ?? 0, loading: failed.data === undefined && failed.error === null }), [recent, failed.data, failed.error]);
+  const recent = useMemo(() => recentFailures(failed.data ?? [], dismissed, now * 60_000), [failed.data, dismissed, now]);
+  const failedTasks = useMemo(() => ({ tasks: recent, unreadable: failed.error !== null, loading: failed.data === undefined && failed.error === null }), [recent, failed.data, failed.error]);
 
   const relinks = useMemo(
-    () => ({ items: channels.data?.relinks ?? [], unread: channels.data?.unread ?? 0, loading: channels.data === undefined && channels.error === null }),
+    () => ({ items: channels.data ?? [], unreadable: channels.error !== null, loading: channels.data === undefined && channels.error === null }),
     [channels.data, channels.error],
   );
 

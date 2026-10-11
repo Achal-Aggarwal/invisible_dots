@@ -2107,6 +2107,7 @@ POST   /api/dots/:id/messages        body: { text }
 GET    /api/dots/:id/messages        ?limit=&order=asc|desc&before=<event id>   conversation, from the event log (a user message carries `origin` when it came through a channel); oldest first by default, at most 500 a page; `order=desc` is the newest first and `before` (the `event_id` of the oldest message of the previous page, desc only) goes on, older, from there
 POST   /api/dots/:id/tasks           body: { description, priority?, scheduled_at? }
 GET    /api/dots/:id/tasks           ?limit=&before=<task id>   the newest created first, at most 200 a page; `before` (the id of the last task of the previous page) goes on, older
+GET    /api/tasks                    ?status=COMPLETED|FAILED|CANCELLED&finished_after=<ISO time>   { tasks }: the tasks of every Dot that ended in that state after that time, the latest end first, at most 200
 GET    /api/tasks/:id
 POST   /api/tasks/:id/cancel
 
@@ -2124,6 +2125,7 @@ GET    /api/dots/:id/browser-identities/:identityId/frame     image/jpeg, only w
 POST   /api/dots/:id/browser-identities/:identityId/close     204; the browser ends, the profile stays
 
 GET    /api/dots/:id/channels        { channels: [{ kind, enabled, status, status_detail, account, settings, peers, created_at }], available: [kind] }; never a token; `available` is what this server runs (WhatsApp only when it was started with it, section 9.8)
+GET    /api/channels                 { channels: [{ dot_id, kind, enabled, status, ... }] }: every channel of every Dot, each with its Dot's id; never a token
 PUT    /api/dots/:id/channels/telegram  body: { token }   links the Dot to the bot (201), or gives the linked bot a new token (200); the token is checked with Telegram, stored encrypted, never returned
 PATCH  /api/dots/:id/channels/:kind  body: { settings?: { approvals?, notify_tasks?, show_arguments? }, enabled? }   enabled false pauses the channel, its people and token stay
 POST   /api/dots/:id/channels/whatsapp/link   202 the channel's record, waiting: starts linking WhatsApp (400 when the server does not run it, 409 `already_linked`)
@@ -2394,9 +2396,9 @@ name>` and `?permission=<name>` (the old `/approvals` and `/dots/<id>/approvals`
 redirect to it). "Needs you" lists the waiting approvals, the one that has waited
 longest first, then the Dots in ERROR and the tasks that failed in the last 24
 hours (each dismissable; the dismissals are kept in this browser only, so a
-cleared browser shows them again). No route lists failed tasks of every Dot, so
-the shell reads each Dot's task list (the newest 200, where a recent failure is)
-and keeps the failed ones, and says when some Dot's list could not be read.
+cleared browser shows them again). The shell reads them for every Dot at once
+(`GET /api/tasks?status=FAILED&finished_after=`, a day back) and again on
+`task.failed`, and says when they could not be read.
 `lib/attention.ts` counts the three, and the rail's Inbox badge, the tab title and
 the favicon all read that one count. The approval card (S7) says what the Dot
 wants to do from the engine's tool table (`TOOL_LABELS`), the
@@ -2425,8 +2427,8 @@ newest page again and keeps the older rows it reaches (when more was answered in
 between than a page holds, the older rows are dropped and read again on request).
 A channel that needs the person (its login was refused: a revoked Telegram token, a WhatsApp device removed on the phone; one the person paused does not count) is a
 card under "Channels to link again" with what the host says and a link to the Channels page, counts in the Inbox's number, the title and the favicon, and marks
-the Dot in the rail and its Channels tab. The shell reads each Dot's `GET /api/dots/:id/channels` for it and again on `channel.status` and `channel.changed` (the host announces a pause, a resume and a removal, which no status says, so the marks follow them without a reload); a Dot whose channels
-cannot be read is counted and said, not hidden.
+the Dot in the rail and its Channels tab. The shell reads every Dot's channels at once (`GET /api/channels`) and again on `channel.status` and `channel.changed` (the host announces a pause, a resume and a removal, which no status says, so the marks follow them without a reload); channels
+that cannot be read are said, not hidden.
 
 The Computer page (`/dots/<id>/computer`) has three views, named in the address
 (`?view=screen|files|usage`, Screen when it says nothing, and so for an address of the

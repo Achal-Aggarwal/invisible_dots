@@ -59,6 +59,7 @@ import {
   type StoredEvent,
   type SystemAnswer,
   type Skill,
+  type TaskState,
   type ToolListAnswer,
 } from "@invisible-dots/shared";
 import { Dispatcher } from "./dispatcher.js";
@@ -454,6 +455,16 @@ export class Scheduler {
   async listTasks(idOrName: string, page: { limit?: number; before?: string } = {}): Promise<TaskRecord[]> {
     const dot = await this.requireDot(idOrName);
     return this.db.tasks.listByDot(dot.id, page);
+  }
+
+  /** The tasks of every Dot that ended in a terminal `status` after `after`, the latest end first: one read for all of them. */
+  async listEndedTasks(status: unknown, after: unknown): Promise<TaskRecord[]> {
+    if (!TERMINAL_TASK_STATES.includes(status as TaskState)) {
+      throw new ControlPlaneError(400, "invalid_request", `status must be one of ${TERMINAL_TASK_STATES.join(", ")}`);
+    }
+    const since = typeof after === "string" ? new Date(after) : new Date(Number.NaN);
+    if (Number.isNaN(since.getTime())) throw new ControlPlaneError(400, "invalid_request", "finished_after must be an ISO 8601 time");
+    return this.db.tasks.listEnded(status as TaskState, since);
   }
 
   async getTask(id: string): Promise<TaskRecord> {

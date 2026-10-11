@@ -13,6 +13,7 @@ import type {
   ChannelPairingAnswer,
   ChannelRecord,
   ChannelsAnswer,
+  EveryChannelAnswer,
   DoctorAnswer,
   DotsAnswer,
   EventsAnswer,
@@ -246,6 +247,11 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     return { tasks: await scheduler.listTasks(request.params.id, { limit, before }) };
   });
 
+  // The tasks of every Dot that ended in a state after a time, the latest end first (the web's failed tasks of the day).
+  app.get<{ Querystring: { status?: unknown; finished_after?: unknown } }>("/api/tasks", async (request): Promise<TasksAnswer> => ({
+    tasks: await scheduler.listEndedTasks(request.query.status, request.query.finished_after),
+  }));
+
   app.get<{ Params: Params }>("/api/tasks/:id", async (request) => scheduler.getTask(request.params.id));
 
   app.post<{ Params: Params }>("/api/tasks/:id/cancel", async (request) => scheduler.cancelTask(request.params.id));
@@ -327,6 +333,9 @@ export function buildServer(options: ServerOptions): FastifyInstance {
     "/api/dots/:id/channels",
     async (request): Promise<ChannelsAnswer> => ({ channels: await channels.list(request.params.id), available: channels.kinds }),
   );
+
+  // Every channel of every Dot, each with its Dot's id (the web's shell watches the ones that need the person).
+  app.get("/api/channels", async (): Promise<EveryChannelAnswer> => ({ channels: await channels.listEvery() }));
 
   // Link the Dot to a Telegram bot, or give the linked one a new token (a revoked token is the only way back from needs_relink).
   app.put<{ Params: Params }>("/api/dots/:id/channels/telegram", async (request, reply): Promise<ChannelRecord> => {
