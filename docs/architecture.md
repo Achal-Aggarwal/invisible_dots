@@ -1790,7 +1790,8 @@ Before it serves it checks that no other engine owns the state.
   `NOT_OPEN` and `GONE`, which `capture-mcp-interface.py` records from the pinned
   package's constants in `nanobot/dots/invisible_playwright_mcp.json`) as the
   whole error of the call, not a phrase inside one: a failed click or select
-  echoes text the page controls, and a page that writes the sentence closes nothing. The manager hears of the end
+  echoes text the page controls, and a page that writes the sentence closes nothing. An open is known the same way:
+  `browser_open`'s answer starts with the library's `OPENED`, recorded beside the two. The manager hears of the end
   when it happens, from the client's transport, so a process that dies while idle
   is closed at once, frees its slot of `max_open`, and the next action says
   `not_open`; a file never claims an open browser for a process that is gone. What a page

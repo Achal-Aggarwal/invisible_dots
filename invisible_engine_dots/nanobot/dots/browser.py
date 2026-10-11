@@ -68,10 +68,10 @@ SERVER_NAME = "browser"
 # guest/image-builder/builder/capture-mcp-interface.py, and a test holds its version to the lock's.
 SERVER_INTERFACE: Mapping[str, Any] = json.loads(Path(__file__).with_name("invisible_playwright_mcp.json").read_bytes())
 
-# What `browser_open` answers when the browser started. Anything else that is not an error is the engine's download
-# progress, and it is asked again. The library has no constant for this answer (its `Work.open` writes it), so it is
-# the one sentence of the server matched here by its words.
-_OPENED = re.compile(r"\bbrowser is open\b", re.IGNORECASE)
+# What `browser_open`'s answer starts with when the browser started: the package's OPENED for the main browser, as
+# invisible_playwright_mcp.json records it. Anything else that is not an error is the engine's download progress, and
+# it is asked again.
+_OPENED = SERVER_INTERFACE["answers"]["opened"] % SERVER_INTERFACE["browser"]
 # What the server answers when its browser closed under it while the process lives on (Firefox crashed): its
 # NOT_OPEN and GONE sentences for the main browser, as invisible_playwright_mcp.json records them from the pinned
 # package's own constants (the package lives in the MCP's own environment, so there is nothing importable here).
@@ -703,7 +703,7 @@ class BrowserManager:
                 )
             if result_is_error(result):
                 raise BrowserIdentityError("launch_failed", f'browser_open failed for identity "{identity_id}": {text}')
-            if _OPENED.search(text):
+            if text.startswith(_OPENED):
                 return
             if loop.time() + wait > deadline:
                 raise BrowserIdentityError(
