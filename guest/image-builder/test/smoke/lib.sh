@@ -23,6 +23,8 @@ KEY=sk-or-v1-smoke-0123456789abcdef
 ENGINE_UNIT="$SMOKE_DIR/../../units/invisible-dots-agent.service"
 ENGINE_PATH=$(sed -n 's/^Environment=PATH=//p' "$ENGINE_UNIT")
 ENGINE_MCP_COMMAND=$(sed -n 's/^Environment=INVISIBLE_DOTS_MCP_COMMAND=//p' "$ENGINE_UNIT")
+# What the desktop's unit gives dot: uv's bin dir in front of the system's, read from the unit itself.
+DOT_PATH=$(sed -n 's/^Environment=PATH=//p' "$SMOKE_DIR/../../units/dot-desktop.service")
 # What the unit gives dot-agentd, read from the unit itself so the smoke starts the daemon with the PATH the
 # image has: system directories only, none of them dot's (a program the daemon starts as itself, the poweroff,
 # is found through it).
