@@ -16,7 +16,7 @@ import { TASK_ENDED_BEFORE_DELIVERY, type Database, type InboundRecord } from "@
 import type { EventLog } from "@invisible-dots/events";
 import { guestErrorCode, guestErrorStatus } from "./driver.js";
 import type { Lifecycle } from "./lifecycle.js";
-import { errorMessage, type Clock, type Logger } from "./support.js";
+import { errorMessage, type Clock, type Logger } from "@invisible-dots/shared";
 
 export interface InboundDeliveryOptions {
   /** Failed sends with a known outcome before a task.created gives its task up as FAILED. */

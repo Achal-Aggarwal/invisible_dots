@@ -6,7 +6,7 @@
  * inbound delivery's job (inbound.ts).
  */
 import type { Database } from "@invisible-dots/database";
-import { errorMessage, type Clock, type Logger } from "./support.js";
+import { errorMessage, type Clock, type Logger } from "@invisible-dots/shared";
 
 // A claim skips a row another transaction holds (SKIP LOCKED); such holds last as long as one guest event's
 // transaction. A pass that claimed nothing while a task could be claimed comes back this soon, this many times;

@@ -6,7 +6,7 @@
  */
 import type { Database } from "@invisible-dots/database";
 import { createTestDatabase, testAdapters, type TestDatabase } from "@invisible-dots/database/testing";
-import type { Logger } from "@invisible-dots/scheduler";
+import { type Logger } from "@invisible-dots/shared";
 import { waitFor } from "@invisible-dots/scheduler/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHANNEL_SETTINGS, TelegramChannelType } from "../src/index.js";

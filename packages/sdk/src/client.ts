@@ -3,6 +3,7 @@
  * section 9.6), built on `fetch` so it runs in Node and in browsers.
  */
 import {
+  abortableSleep,
   SseParser,
   type ApprovalStatus,
   type BrowserIdentity,
@@ -501,7 +502,7 @@ export class InvisibleDotsClient {
       }
       attempt++;
       options.onReconnect?.({ after, attempt, error: failure });
-      await delay(Math.min(500 * 2 ** (attempt - 1), 15_000), options.signal);
+      await abortableSleep(Math.min(500 * 2 ** (attempt - 1), 15_000), options.signal);
     }
   }
 
@@ -534,17 +535,4 @@ async function toApiError(response: Response, route: string): Promise<ApiError> 
     // Not JSON; the text itself is the message.
   }
   return new ApiError(response.status, `http_${response.status}`, `${route}: HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ""}`);
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) return resolve();
-    const timer = setTimeout(done, ms);
-    function done() {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve();
-    }
-    signal?.addEventListener("abort", done, { once: true });
-  });
 }

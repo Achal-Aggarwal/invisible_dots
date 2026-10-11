@@ -3,6 +3,7 @@ export * from "./browser.js";
 export * from "./files.js";
 export * from "./paths.js";
 export * from "./sockets.js";
+export * from "./stderr-logger.js";
 export * from "./process.js";
 export * from "./run-process.js";
 export * from "./replace-file.js";

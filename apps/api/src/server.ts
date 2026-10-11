@@ -6,7 +6,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { TELEGRAM_TOKEN_SECRET, type ChannelHub } from "@invisible-dots/channels";
 import { StreamOverflowError } from "@invisible-dots/events";
-import { ControlPlaneError, errorMessage, silentLogger, type Logger, type Scheduler } from "@invisible-dots/scheduler";
+import { type Scheduler } from "@invisible-dots/scheduler";
 import { STREAM_ERROR_EVENT } from "@invisible-dots/sdk";
 import type {
   ApprovalsAnswer,
@@ -24,27 +24,14 @@ import type {
   TasksAnswer,
   UsageAnswer,
 } from "@invisible-dots/sdk/types";
-import {
-  APPROVAL_LIST_LIMIT,
-  CONVERSATION_LIST_LIMIT,
-  APPROVAL_STATUSES,
-  CHANNEL_KINDS,
-  LIST_ORDERS,
-  MAX_EVENT_PAGE,
-  TASK_LIST_LIMIT,
-  type ApprovalStatus,
-  type ChannelKind,
-  type DoctorCheck,
-  type ListOrder,
-  type SkillListAnswer,
-  type McpSecretsAnswer,
-  type ToolListAnswer,
-} from "@invisible-dots/shared";
+import { APPROVAL_LIST_LIMIT, APPROVAL_STATUSES, type ApprovalStatus, CHANNEL_KINDS, type ChannelKind, ControlPlaneError, CONVERSATION_LIST_LIMIT, type DoctorCheck, errorMessage, LIST_ORDERS, type ListOrder, type Logger, MAX_EVENT_PAGE, type McpSecretsAnswer, silentLogger, type SkillListAnswer, TASK_LIST_LIMIT, type ToolListAnswer } from "@invisible-dots/shared";
 import { doctorAnswer } from "@invisible-dots/vm-manager";
 import { serveFile } from "./file-types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import apiPackage from "../package.json" with { type: "json" };
 
-export const API_VERSION = "0.1.0";
+/** The version `GET /api/health` reports: this package's, as the CLI's `--version` reports its own. */
+export const API_VERSION: string = apiPackage.version;
 
 /** A comment line on idle SSE connections, so proxies and clients see the connection is alive. */
 export const SSE_HEARTBEAT_MS = 15_000;

@@ -8,7 +8,8 @@ import type { Database } from "@invisible-dots/database";
 import { createTestDatabase, testAdapters, type TestDatabase } from "@invisible-dots/database/testing";
 import type { InboundEvent, OutboundEvent, SecretsRequest } from "@invisible-dots/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { Scheduler, type Logger, type SchedulerOptions } from "../src/index.js";
+import { Scheduler, type SchedulerOptions } from "../src/index.js";
+import { type Logger } from "@invisible-dots/shared";
 import type { GuestApi, GuestEndpoint } from "../src/index.js";
 import { FakeDriver, FakeGuest, FakeGuestError, ManualClock, waitFor, waitUntilSettledReady } from "../src/testing.js";
 

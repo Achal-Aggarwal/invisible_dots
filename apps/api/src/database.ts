@@ -4,7 +4,7 @@
  * migrated, and checked against a master key that was lost.
  */
 import { Database, databaseTarget, describeDatabaseTarget } from "@invisible-dots/database";
-import { errorMessage, type Logger } from "@invisible-dots/scheduler";
+import { errorMessage, type Logger } from "@invisible-dots/shared";
 
 export interface OpenDatabaseOptions {
   env: Record<string, string | undefined>;

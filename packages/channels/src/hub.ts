@@ -10,21 +10,7 @@
 import type { ChannelBindingRecord, ChannelPeerRow, Database } from "@invisible-dots/database";
 import { isUniqueViolation } from "@invisible-dots/database";
 import type { EventLog } from "@invisible-dots/events";
-import {
-  CHANNEL_KINDS,
-  type ApprovalRecord,
-  newId,
-  type ChannelChange,
-  type ChannelKind,
-  type ChannelLinkFrame,
-  type ChannelPairingAnswer,
-  type ChannelRecord,
-  type ChannelSettings,
-  type MessageAnswer,
-  type MessageOrigin,
-  type StoredEvent,
-} from "@invisible-dots/shared";
-import { ControlPlaneError, errorMessage, notFound, silentLogger, systemClock, type Clock, type Logger } from "@invisible-dots/scheduler";
+import { type ApprovalRecord, CHANNEL_KINDS, type ChannelChange, type ChannelKind, type ChannelLinkFrame, type ChannelPairingAnswer, type ChannelRecord, type ChannelSettings, type Clock, ControlPlaneError, errorMessage, type Logger, type MessageAnswer, type MessageOrigin, newId, notFound, silentLogger, type StoredEvent, systemClock } from "@invisible-dots/shared";
 import { DEFAULT_BACKOFF, type BackoffOptions } from "./backoff.js";
 import { parseApprovalReply } from "./approval-text.js";
 import { ChannelCredentialsError, type ApprovalAction, type ChannelSink, type ChannelStatusReport, type ChannelType, type InboundChat, type PairingAttempt } from "./channel.js";

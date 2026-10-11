@@ -31,7 +31,8 @@ import {
 } from "@invisible-dots/shared";
 import { guestErrorCode, guestErrorStatus, type ComputerDriver, type ComputerSpecInput, type ComputerState, type GuestApi } from "./driver.js";
 import { applyGuestEvent, dotStatusForAgent, type AppliedGuestEvent } from "./guest-events.js";
-import { BackgroundWork, ControlPlaneError, errorMessage, KeyedMutex, sleep, type Clock, type Logger } from "./support.js";
+import { abortableSleep, ControlPlaneError, errorMessage, type Clock, type Logger } from "@invisible-dots/shared";
+import { BackgroundWork, KeyedMutex } from "./support.js";
 
 export interface LifecycleOptions {
   /** How long a started VM may take to pass the READY procedure. Default 10 minutes (a first boot runs cloud-init). */
@@ -716,7 +717,7 @@ export class Lifecycle {
         this.#background.run("recording a VM that stopped by itself", dotId, () => this.#exited(dotId));
         return;
       }
-      await sleep(delay, signal);
+      await abortableSleep(delay, signal);
       delay = Math.min(delay * 2, this.#opts.pumpMaxRetryMs);
     }
   }

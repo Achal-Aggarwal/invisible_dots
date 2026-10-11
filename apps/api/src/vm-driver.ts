@@ -11,18 +11,8 @@
  */
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type {
-  ComputerDriver,
-  ComputerSpecInput,
-  ComputerState,
-  CreatedComputer,
-  GuestApi,
-  GuestEndpoint,
-  Logger,
-  StartedComputer,
-  WaitForHealthOptions,
-} from "@invisible-dots/scheduler";
-import { imageLabel, imageVersionOf, type HealthAnswer, type HostPaths, type ImageKind } from "@invisible-dots/shared";
+import { type ComputerDriver, type ComputerSpecInput, type ComputerState, type CreatedComputer, type GuestApi, type GuestEndpoint, type StartedComputer, type WaitForHealthOptions } from "@invisible-dots/scheduler";
+import { type HealthAnswer, type HostPaths, type ImageKind, imageLabel, imageVersionOf, type Logger } from "@invisible-dots/shared";
 import { VmManager, type StartVmResult, type VmSpec } from "@invisible-dots/vm-manager";
 
 /** Compare versions such as "2026.10.1" and "2026.9.3" numerically, part by part. */
