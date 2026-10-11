@@ -9,7 +9,7 @@ import pytest
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
+from nanobot.cron.types import CronJobState, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -222,38 +222,6 @@ def test_list_shows_next_run(tmp_path) -> None:
     assert "(UTC)" in result
 
 
-def test_list_includes_protected_system_job(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.register_system_job(CronJob(
-        id="internal",
-        name="internal",
-        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
-        payload=CronPayload(kind="system_event"),
-    ))
-
-    result = tool._list_jobs()
-
-    assert "- internal (id: internal, cron: 0 */2 * * * (UTC))" in result
-    assert "System-managed internal job." in result
-    assert "cannot be removed" in result
-
-
-def test_remove_protected_system_job_returns_clear_feedback(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.register_system_job(CronJob(
-        id="internal",
-        name="internal",
-        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
-        payload=CronPayload(kind="system_event"),
-    ))
-
-    result = tool._remove_job("internal")
-
-    assert "Cannot remove job `internal`." in result
-    assert "protected system-managed cron job" in result
-    assert tool._cron.get_job("internal") is not None
-
-
 def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
     result = tool._add_job(None, "Morning standup", None, "0 8 * * *", None, None)
@@ -367,12 +335,19 @@ def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
 
 def test_list_excludes_disabled_jobs(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    job = tool._cron.add_job(
-        name="Paused job",
-        schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
-        message="test",
-    )
-    tool._cron.enable_job(job.id, enabled=False)
+    store_path = tool._cron.store_path
+    store_path.parent.mkdir(parents=True)
+    # A one-time job that ran and keeps its record is disabled.
+    store_path.write_text(json.dumps({
+        "version": 1,
+        "jobs": [{
+            "id": "paused",
+            "name": "Paused job",
+            "enabled": False,
+            "schedule": {"kind": "at", "atMs": 1},
+            "payload": {"kind": "agent_turn", "message": "test"},
+        }],
+    }), encoding="utf-8")
 
     result = tool._list_jobs()
     assert "Paused job" not in result
@@ -380,7 +355,7 @@ def test_list_excludes_disabled_jobs(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_zero_interval_job_can_be_listed_repaired_and_removed(tmp_path) -> None:
+async def test_legacy_zero_interval_job_can_be_listed_and_removed(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     store_path = tool._cron.store_path
     store_path.parent.mkdir(parents=True)
@@ -397,17 +372,8 @@ async def test_legacy_zero_interval_job_can_be_listed_repaired_and_removed(tmp_p
     }), encoding="utf-8")
 
     assert "Legacy reminder" in await tool.execute(action="list")
-    renamed = tool._cron.update_job("legacy-zero", name="Repair me")
-    assert isinstance(renamed, CronJob)
-    assert renamed.schedule.every_ms == 0
-    repaired = tool._cron.update_job(
-        "legacy-zero", schedule=CronSchedule(kind="every", every_ms=60_000),
-    )
-    assert isinstance(repaired, CronJob)
-    assert repaired.state.next_run_at_ms is not None
 
     reloaded = _make_tool(tmp_path)
-    assert "Repair me" in await reloaded.execute(action="list")
     await reloaded.execute(action="remove", job_id="legacy-zero")
     assert _make_tool(tmp_path)._cron.list_jobs(include_disabled=True) == []
 

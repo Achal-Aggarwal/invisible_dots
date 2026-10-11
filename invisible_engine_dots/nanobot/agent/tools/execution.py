@@ -3,9 +3,8 @@
 `_admit_tool_call` and `_run_tool_call` are the one boundary every tool execution
 crosses. The policy gate (a `ToolGate`, required: no call runs without one) decides
 in `_admit_tool_call`, on the final arguments the tool would run with and before
-anything runs: nothing else in the engine can start a tool. A batch of calls that
-run together is decided in full, in the order of the response, before any of its
-calls starts.
+anything runs: nothing else in the engine can start a tool. The calls of one
+response run one at a time, in the order of the response.
 """
 
 from __future__ import annotations
@@ -59,25 +58,22 @@ async def execute_tool_calls(
     tools: ToolRegistry,
     tool_calls: list[ToolCallRequest],
     *,
-    concurrent: bool,
     hook: AgentHook,
     context: AgentHookContext,
     gate: ToolGate,
     model_messages: list[dict[str, Any]] | None = None,
     on_result: ResultCallback | None = None,
 ) -> tuple[list[Any], list[dict[str, str]]]:
-    """Execute one model response's tool calls in stable result order.
+    """Execute one model response's tool calls, one at a time, in the order of the response.
 
-    The gate decides every call of a batch, in order, before any call of the batch
-    runs. A call it parks ends the round: every call of the response after it, in
-    its batch or in a later one, is not decided, not run and says so. The calls
+    The gate decides each call before it runs. A call it parks ends the round: every
+    call of the response after it is not decided, not run and says so. The calls
     before it were allowed and run. `on_result` is awaited with each call's result
-    and event in the order of the calls: right after the call when it runs alone,
-    after its batch when it ran concurrently.
+    and event right after the call.
     """
     @cache
     def read_results() -> dict[str, str]:
-        """Index once, on the first read-dedup check in this batch."""
+        """Index once, on the first read-dedup check in this response."""
         return {
             message["tool_call_id"]: message["content"]
             for message in model_messages or []
@@ -85,42 +81,25 @@ async def execute_tool_calls(
             and isinstance(message.get("tool_call_id"), str)
             and isinstance(message.get("content"), str)
         }
-    tool_results: list[_Outcome] = []
+    results: list[Any] = []
+    events: list[dict[str, str]] = []
     parked = False
-    for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
-        admissions: list[_Admitted | _Outcome] = []
-        for tool_call in batch:
-            admission = (
-                _skip_tool_call(tool_call, context, gate)
-                if parked
-                else _admit_tool_call(tools, tool_call, context, gate)
-            )
-            admissions.append(admission)
-            if not isinstance(admission, _Admitted) and admission[1]["status"] == STATUS_PARKED:
-                parked = True
-        runs = [
-            (tool_call, admission)
-            for tool_call, admission in zip(batch, admissions)
-            if isinstance(admission, _Admitted)
-        ]
-        if len(runs) > 1:
-            ran = iter(await asyncio.gather(*(
-                _run_tool_call(tool_call, admission, hook, context, read_results)
-                for tool_call, admission in runs
-            )))
+    for tool_call in tool_calls:
+        admission = (
+            _skip_tool_call(tool_call, context, gate)
+            if parked
+            else _admit_tool_call(tools, tool_call, context, gate)
+        )
+        if isinstance(admission, _Admitted):
+            result, event = await _run_tool_call(tool_call, admission, hook, context, read_results)
         else:
-            ran = iter([
-                await _run_tool_call(tool_call, admission, hook, context, read_results)
-                for tool_call, admission in runs
-            ])
-        outcomes = [next(ran) if isinstance(admission, _Admitted) else admission for admission in admissions]
-        for tool_call, (result, event) in zip(batch, outcomes):
-            if on_result is not None:
-                await on_result(tool_call, result, event)
-            tool_results.append((result, event))
-
-    results = [result for result, _event in tool_results]
-    events = [event for _result, event in tool_results]
+            result, event = admission
+            if event["status"] == STATUS_PARKED:
+                parked = True
+        if on_result is not None:
+            await on_result(tool_call, result, event)
+        results.append(result)
+        events.append(event)
     return results, events
 
 
@@ -219,28 +198,3 @@ async def _run_tool_call(
         detail = detail[:120] + "..."
     return result, {"name": tool_call.name, "status": "ok", "detail": detail}
 
-
-def _partition_tool_batches(
-    tools: ToolRegistry,
-    tool_calls: list[ToolCallRequest],
-    *,
-    concurrent: bool,
-) -> list[list[ToolCallRequest]]:
-    if not concurrent:
-        return [[tool_call] for tool_call in tool_calls]
-
-    batches: list[list[ToolCallRequest]] = []
-    current: list[ToolCallRequest] = []
-    for tool_call in tool_calls:
-        tool = tools.get(tool_call.name)
-        can_batch = bool(tool and tool.concurrency_safe)
-        if can_batch:
-            current.append(tool_call)
-            continue
-        if current:
-            batches.append(current)
-            current = []
-        batches.append([tool_call])
-    if current:
-        batches.append(current)
-    return batches

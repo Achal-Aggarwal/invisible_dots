@@ -6,14 +6,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import math
-import re
 import secrets
 import string
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Iterable
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
@@ -55,62 +53,7 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-Title": "invisible_dots",
 }
 _KIMI_K3_MODEL = "kimi-k3"
-_KIMI_THINKING_MODELS: frozenset[str] = frozenset({
-    "kimi-k2.5",
-    "kimi-k2.6",
-    "kimi-k2.7",
-    "kimi-k2.7-code",
-    "kimi-k2.7-code-highspeed",
-    "k2.6-code-preview",
-})
-_KIMI_ALWAYS_THINKING_MODELS: frozenset[str] = frozenset({
-    "kimi-k2.7-code",
-    "kimi-k2.7-code-highspeed",
-})
-_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
-# Thinking-capable MiMo models per Xiaomi docs (see
-# tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
-# because it does not support thinking.
-_MIMO_THINKING_MODELS: frozenset[str] = frozenset({
-    "mimo-v2.5-pro",
-    "mimo-v2.5",
-    "mimo-v2-pro",
-    "mimo-v2-omni",
-})
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
-
-# Maps a model's thinking style → extra_body builder.
-# Each builder takes a bool (thinking_enabled) and returns the dict to
-# merge into extra_body, keeping the style→wire-format mapping in one place.
-_THINKING_STYLE_MAP: dict[
-    str,
-    Callable[[bool], dict[str, Any]],
-] = {
-    "thinking_type": lambda on: {"thinking": {"type": "enabled" if on else "disabled"}},
-    "enable_thinking": lambda on: {"enable_thinking": on},
-    "reasoning_split": lambda on: {"reasoning_split": on},
-}
-_GATEWAY_REASONING_STYLE_MAP: dict[
-    str,
-    Callable[[str], dict[str, Any]],
-] = {
-    "reasoning_effort": lambda effort: {"reasoning": {"effort": effort}},
-}
-_QWEN_THINKING_MODELS: frozenset[str] = frozenset({
-    "qwen3.7-max",
-    "qwen3.7-plus",
-    "qwen3.6-max-preview",
-    "qwen3.6-plus",
-    "qwen3.6-flash",
-    "qwen3.5-plus",
-    "qwen3.5-flash",
-})
-
-_MODEL_THINKING_STYLES: dict[str, str] = {
-    **dict.fromkeys(_KIMI_THINKING_MODELS, "thinking_type"),
-    **dict.fromkeys(_MIMO_THINKING_MODELS, "thinking_type"),
-    **dict.fromkeys(_QWEN_THINKING_MODELS, "enable_thinking"),
-}
 
 
 def _model_slug(model_name: str) -> str:
@@ -125,88 +68,9 @@ def _requires_max_completion_tokens(model_name: str) -> bool:
     )
 
 
-def _model_thinking_style(model_name: str) -> str:
-    return _MODEL_THINKING_STYLES.get(_model_slug(model_name), "")
-
-
-def _thinking_extra_body(style: str, thinking_enabled: bool) -> dict[str, Any] | None:
-    builder = _THINKING_STYLE_MAP.get(style)
-    return builder(thinking_enabled) if builder else None
-
-
-def _gateway_reasoning_extra_body(style: str, effort: str | None) -> dict[str, Any] | None:
-    if not effort:
-        return None
-    builder = _GATEWAY_REASONING_STYLE_MAP.get(style)
-    return builder(effort) if builder else None
-
-
 def _short_tool_id() -> str:
     """9-char alphanumeric ID compatible with all providers (incl. Mistral)."""
     return "".join(secrets.choice(_ALNUM) for _ in range(9))
-
-
-def _strip_json_fence(text: str) -> str:
-    stripped = text.strip()
-    if not stripped.startswith("```") or not stripped.endswith("```"):
-        return stripped
-    lines = stripped.splitlines()
-    if len(lines) < 2:
-        return stripped
-    return "\n".join(lines[1:-1]).strip()
-
-
-def _extract_text_tool_calls(content: str | None) -> tuple[str | None, list[ToolCallRequest]]:
-    """Normalize common text-format tool call blocks into structured calls."""
-    if not content or "<tool_call>" not in content:
-        return content, []
-
-    tool_calls: list[ToolCallRequest] = []
-    spans: list[tuple[int, int]] = []
-    for match in _TEXT_TOOL_CALL_RE.finditer(content):
-        try:
-            raw_payload: object = json.loads(
-                _strip_json_fence(match.group(1))
-            )
-        except Exception:
-            continue
-        if not isinstance(raw_payload, dict):
-            continue
-        payload = cast(dict[str, Any], raw_payload)
-
-        nested = cast(object, payload.get("tool_call"))
-        if isinstance(nested, dict):
-            payload = cast(dict[str, Any], nested)
-        function = cast(object, payload.get("function"))
-        if not isinstance(function, dict):
-            function = payload
-        function_data = cast(dict[str, Any], function)
-        name = cast(object, function_data.get("name"))
-        if not isinstance(name, str) or not name:
-            continue
-
-        arguments = function_data.get(
-            "arguments",
-            payload.get("arguments", {}),
-        )
-        tool_calls.append(ToolCallRequest(
-            id=str(payload.get("id") or _short_tool_id()),
-            name=name,
-            arguments=parse_tool_arguments(arguments),
-        ))
-        spans.append(match.span())
-
-    if not tool_calls:
-        return content, []
-
-    visible_parts: list[str] = []
-    last = 0
-    for start, end in spans:
-        visible_parts.append(content[last:start])
-        last = end
-    visible_parts.append(content[last:])
-    visible_content = "".join(visible_parts).strip() or None
-    return visible_content, tool_calls
 
 
 def _get(obj: object, key: str) -> Any:
@@ -296,50 +160,6 @@ def _is_local_endpoint(api_base: str | None) -> bool:
     return addr.is_loopback or addr.is_private
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge *override* into *base*, returning a new dict.
-
-    Nested dicts are merged key-by-key; all other types in *override*
-    replace the corresponding key in *base*.
-    """
-    merged = dict(base)
-    for key, value in override.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(value, dict)
-        ):
-            merged[key] = _deep_merge(
-                cast(dict[str, Any], merged[key]),
-                cast(dict[str, Any], value),
-            )
-        else:
-            merged[key] = value
-    return merged
-
-
-def _merge_chat_extra_body(
-    kwargs: dict[str, Any],
-    extra_body: dict[str, Any],
-) -> dict[str, Any]:
-    """Merge configured Chat Completions fields without clobbering tools."""
-    regular_extra = {key: value for key, value in extra_body.items() if key != "tools"}
-    merged = dict(kwargs)
-    if regular_extra:
-        existing = kwargs.get("extra_body", {})
-        merged["extra_body"] = _deep_merge(existing, regular_extra)
-
-    if "tools" in extra_body:
-        current_tools = kwargs.get("tools")
-        configured_tools = extra_body["tools"]
-        if isinstance(current_tools, list) and isinstance(configured_tools, list):
-            merged["tools"] = [*current_tools, *configured_tools]
-        else:
-            merged["tools"] = configured_tools
-
-    return merged
-
-
 class StreamIdleTimeout(TimeoutError):
     """The model's stream sent nothing for `STREAM_IDLE_TIMEOUT_S`; the text of the failure is `failure_text`'s."""
 
@@ -356,11 +176,7 @@ class OpenAICompatProvider(LLMProvider):
         api_key: str,
         api_base: str | None = None,
         default_model: str = "gpt-4o",
-        extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
-        extra_body: dict[str, Any] | None = None,
-        extra_query: dict[str, str] | None = None,
-        proxy: str | None = None,
         provider_name: str = "openai",
         request_timeout_s: float = _OPENAI_COMPAT_REQUEST_TIMEOUT_S,
     ):
@@ -368,11 +184,7 @@ class OpenAICompatProvider(LLMProvider):
             raise ValueError("api_key must be a non-empty string: a provider never sends a request without its key")
         super().__init__(api_base, provider_name=provider_name, api_key=api_key)
         self.default_model = default_model
-        self.extra_headers = extra_headers or {}
         self._spec = spec
-        self._extra_body = dict(extra_body or {})
-        self._extra_query = extra_query or {}
-        self._proxy = proxy or None
         self._request_timeout_s = request_timeout_s
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
@@ -380,8 +192,6 @@ class OpenAICompatProvider(LLMProvider):
         self._default_headers = {"x-session-affinity": uuid.uuid4().hex}
         if _uses_openrouter_attribution(effective_base):
             self._default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
-        if extra_headers:
-            self._default_headers.update(extra_headers)
         self._is_local = _is_local_endpoint(effective_base)
 
         # Lazy-init: the OpenAI client and its httpx transport are expensive
@@ -400,14 +210,7 @@ class OpenAICompatProvider(LLMProvider):
 
         timeout_s = self._request_timeout_s
         http_client: httpx.AsyncClient | None = None
-        if self._proxy:
-            http_client = httpx.AsyncClient(
-                timeout=timeout_s,
-                proxy=self._proxy,
-                trust_env=False,
-                follow_redirects=True,
-            )
-        elif self._is_local:
+        if self._is_local:
             # Local model servers (Ollama, llama.cpp, vLLM) often close idle
             # HTTP connections before the client-side keepalive expires. When
             # two LLM calls happen seconds apart (e.g. heartbeat _decide then
@@ -435,7 +238,6 @@ class OpenAICompatProvider(LLMProvider):
             api_key=self.api_key,
             base_url=self._effective_base,
             default_headers=self._default_headers,
-            default_query=self._extra_query or None,
             max_retries=0,
             timeout=timeout_s,
             http_client=http_client,
@@ -575,22 +377,16 @@ class OpenAICompatProvider(LLMProvider):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _supports_temperature(
-        model_name: str,
-        reasoning_effort: str | None = None,
-    ) -> bool:
+    def _supports_temperature(model_name: str) -> bool:
         """Return True when the model accepts a temperature parameter.
 
         Temperature is omitted for fixed-temperature Kimi K3, GPT-5, and
-        o-series models. GPT-6 requires explicit ``"none"`` effort; its
-        default enables reasoning.
+        o-series models, and for GPT-6, whose default enables reasoning.
         """
         if _model_slug(model_name) == _KIMI_K3_MODEL:
             return False
         name = model_name.lower()
-        if "gpt-6" in name:
-            return bool(reasoning_effort and reasoning_effort.lower() == "none")
-        return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
+        return not any(token in name for token in ("gpt-5", "gpt-6", "o1", "o3", "o4"))
 
     def _build_kwargs(
         self,
@@ -599,9 +395,7 @@ class OpenAICompatProvider(LLMProvider):
         model: str | None,
         max_tokens: int | None,
         temperature: float,
-        reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
-        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         model_name = model or self.default_model
         spec = self._spec
@@ -614,7 +408,7 @@ class OpenAICompatProvider(LLMProvider):
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
         }
 
-        if self._supports_temperature(model_name, reasoning_effort):
+        if self._supports_temperature(model_name):
             kwargs["temperature"] = temperature
 
         # No limit is sent when none is known: the model's own maximum applies.
@@ -624,77 +418,9 @@ class OpenAICompatProvider(LLMProvider):
             else:
                 kwargs["max_tokens"] = max(1, max_tokens)
 
-        # Normalize reasoning_effort into a semantic form (OpenAI vocab)
-        # used for internal decisions, and a wire form actually sent out.
-        semantic_effort: str | None = None
-        if isinstance(reasoning_effort, str):
-            semantic_effort = reasoning_effort.lower()
-            if semantic_effort == "minimum":
-                semantic_effort = "minimal"
-
-        wire_effort = reasoning_effort
-        slug = _model_slug(model_name)
-        if slug == _KIMI_K3_MODEL and semantic_effort is not None:
-            # K3 always reasons and currently accepts only the top-level
-            # reasoning_effort="max". Preserve disabled/default semantics by
-            # omitting the field; normalize older enabled presets to "max" so
-            # switching from a K2.x model does not send an unsupported value.
-            if semantic_effort in ("none", "minimal"):
-                wire_effort = None
-            else:
-                semantic_effort = "max"
-                wire_effort = "max"
-
-        if wire_effort and semantic_effort != "none":
-            kwargs["reasoning_effort"] = wire_effort
-
-        # Only send thinking controls when reasoning_effort is explicit so
-        # omitting the config preserves each model's default.
-        model_style = _model_thinking_style(model_name)
-        if reasoning_effort is not None:
-            thinking_enabled = semantic_effort not in ("none", "minimal")
-            if model_style and (thinking_enabled or slug not in _KIMI_ALWAYS_THINKING_MODELS):
-                extra = _thinking_extra_body(model_style, thinking_enabled)
-                if extra:
-                    kwargs.setdefault("extra_body", {}).update(extra)
-                gateway_style = spec.gateway_reasoning_style if spec else ""
-                if gateway_style:
-                    extra = _gateway_reasoning_extra_body(gateway_style, semantic_effort)
-                    if extra:
-                        kwargs.setdefault("extra_body", {}).update(extra)
-
-            # Moonshot rejects requests that carry both 'reasoning_effort'
-            # and the native 'thinking' param.  We already expressed the
-            # user's intent via the model-native shape, so drop the
-            # redundant wire-level kwarg.  Only kimi models need this;
-            # Xiaomi's API accepts both params.
-            if slug in _KIMI_THINKING_MODELS:
-                kwargs.pop("reasoning_effort", None)
-
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
-
-        # Backfill reasoning_content="" on assistants missing it: thinking
-        # models reject history otherwise (#3554, #3584); "" reads as "no
-        # thinking that turn".
-        explicit_thinking = (
-            reasoning_effort is not None
-            and semantic_effort not in ("none", "minimal")
-            and bool(model_style)
-        )
-        if explicit_thinking:
-            for msg in kwargs["messages"]:
-                if msg.get("role") == "assistant" and "reasoning_content" not in msg:
-                    msg["reasoning_content"] = ""
-
-        # Merge user-configured extra_body last so ordinary fields can override
-        # defaults. Keep configured tools at the top level: the SDK
-        # otherwise lets extra_body.tools replace nanobot's generated functions.
-        if self._extra_body:
-            kwargs = _merge_chat_extra_body(kwargs, self._extra_body)
-        if extra_headers:
-            kwargs["extra_headers"] = extra_headers
 
         return kwargs
 
@@ -1038,8 +764,6 @@ class OpenAICompatProvider(LLMProvider):
             )
             for b in tc_bufs.values()
         ]
-        if not tool_calls:
-            content, tool_calls = _extract_text_tool_calls(content)
 
         return LLMResponse(
             content=content,
@@ -1148,15 +872,13 @@ class OpenAICompatProvider(LLMProvider):
         model: str | None = None,
         max_tokens: int | None = None,
         temperature: float = 0.7,
-        reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         client = await self._ensure_client()
         idle_timeout_s = STREAM_IDLE_TIMEOUT_S
         try:
             kwargs = self._build_kwargs(
-                messages, tools, model, max_tokens, temperature,
-                reasoning_effort, tool_choice,
+                messages, tools, model, max_tokens, temperature, tool_choice,
             )
             kwargs["stream"] = True
             kwargs["timeout"] = idle_timeout_s

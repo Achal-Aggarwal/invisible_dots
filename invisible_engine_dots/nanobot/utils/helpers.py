@@ -3,18 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
-import stat
-import time
-import uuid
 from contextlib import suppress
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
-
-from loguru import logger
 
 from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
 
@@ -283,27 +275,12 @@ def extract_reasoning(
     return None, content
 
 
-def ensure_dir(path: Path) -> Path:
-    """Ensure directory exists, return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
 
 
-_UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
-_TOOL_RESULTS_DIR = ".nanobot/tool-results"
-_TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
-_TOOL_RESULT_MAX_BUCKETS = 32
 _TRUNCATED_SUFFIX = "\n... (truncated)"
-
-
-def safe_filename(name: str) -> str:
-    """Replace unsafe path characters with underscores."""
-    return _UNSAFE_CHARS.sub("_", name).strip()
 
 
 def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
@@ -438,120 +415,6 @@ def stringify_text_blocks(content: list[object]) -> str | None:
             return None
         parts.append(text)
     return "\n".join(parts)
-
-
-def _render_tool_result_reference(
-    reference_path: str,
-    *,
-    original_size: int,
-    preview: str,
-    truncated_preview: bool,
-    max_chars: int | None = None,
-) -> str:
-    result = (
-        f"[tool output persisted]\n"
-        f"Full output saved to workspace path: {reference_path}\n"
-        f"Original size: {original_size} chars\n"
-        f"Preview:\n{preview}"
-    )
-    if truncated_preview:
-        result += "\n...\nPreview is also truncated."
-    result += "\nResult truncated. Read the saved file if you need the complete output."
-    if max_chars and len(result) > max_chars:
-        result = f"[truncated: {reference_path}]"
-    return result
-
-
-def _bucket_mtime(path: Path) -> float:
-    try:
-        return path.stat().st_mtime
-    except OSError:
-        return 0.0
-
-
-def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
-    siblings = [path for path in root.iterdir() if path.is_dir() and path != current_bucket]
-    cutoff = time.time() - _TOOL_RESULT_RETENTION_SECS
-    for path in siblings:
-        if _bucket_mtime(path) < cutoff:
-            shutil.rmtree(path, ignore_errors=True)
-    keep = max(_TOOL_RESULT_MAX_BUCKETS - 1, 0)
-    siblings = [path for path in siblings if path.exists()]
-    if len(siblings) <= keep:
-        return
-    siblings.sort(key=_bucket_mtime, reverse=True)
-    for path in siblings[keep:]:
-        shutil.rmtree(path, ignore_errors=True)
-
-
-def _write_text_atomic(path: Path, content: str) -> None:
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    existing_mode: int | None = None
-    with suppress(OSError):
-        existing_mode = stat.S_IMODE(path.stat().st_mode)
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            if existing_mode is not None:
-                os.chmod(tmp, existing_mode)
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-        with suppress(OSError, NotImplementedError):
-            dfd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-
-
-def maybe_persist_tool_result(
-    workspace: Path | None,
-    session_key: str | None,
-    tool_call_id: str,
-    content: str,
-    *,
-    max_chars: int,
-) -> str:
-    """Offload oversized text.
-
-    Complete references may exceed the per-block ``max_chars`` budget.
-    """
-    if workspace is None or max_chars <= 0 or len(content) <= max_chars:
-        return content
-
-    root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
-    bucket = ensure_dir(root / safe_filename(session_key or "default"))
-    try:
-        _cleanup_tool_result_buckets(root, bucket)
-    except Exception:
-        logger.exception("Failed to clean stale tool result buckets in {}", root)
-    path = bucket / f"{safe_filename(tool_call_id)}.txt"
-    if not path.exists():
-        _write_text_atomic(path, content)
-
-    reference_path = str(path.resolve())
-    overhead = len(_render_tool_result_reference(
-        reference_path, original_size=len(content), preview="", truncated_preview=True,
-    ))
-    available = max(0, max_chars - overhead)
-    separator = "\n...\n"
-    tail_chars = min(1200, max(0, (available - len(separator)) // 4))
-    if tail_chars:
-        head_chars = available - tail_chars - len(separator)
-        preview = content[:head_chars] + separator + content[-tail_chars:]
-    else:
-        preview = content[:available]
-    return _render_tool_result_reference(
-        reference_path,
-        original_size=len(content),
-        preview=preview,
-        truncated_preview=True,
-        max_chars=max_chars,
-    )
 
 
 def build_assistant_message(

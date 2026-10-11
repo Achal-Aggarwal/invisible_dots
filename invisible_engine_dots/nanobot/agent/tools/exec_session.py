@@ -659,10 +659,6 @@ class ExecSessionTool(Tool):
         self._manager = manager
 
     @property
-    def exclusive(self) -> bool:
-        return True
-
-    @property
     def name(self) -> str:
         return "exec_session"
 
@@ -809,10 +805,6 @@ class ListExecSessionsTool(Tool):
     @property
     def description(self) -> str:
         return "List active exec sessions."
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     async def execute(self, **kwargs: Any) -> str:
         try:

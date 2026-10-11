@@ -5,7 +5,9 @@ schemas, and puts the server's instructions in its prompt, as an MCP host does (
 reads them from `invisible_engine_dots/nanobot/dots/invisible_playwright_mcp.json`, which this writes from the
 real server at the version `mcp-requirements.lock` pins, started the way the engine starts it
 (`INVISIBLE_MCP_HOST_MANAGED=1`): `initialize` gives the version and the instructions, `tools/list` the tools.
-Nothing is opened: listing starts no browser.
+Nothing is opened: listing starts no browser. It also records the sentences any tool can answer with instead of
+working (the browser is not open, the browser is gone), taken from the installed package's own constants, so the
+engine recognizes them by the library's words at the pinned version and a version that changes them shows.
 
 Run it with a Python that has the pinned server installed (and so the `mcp` package it depends on), whenever
 the lock moves to another version:
@@ -22,13 +24,15 @@ import os
 import sys
 from pathlib import Path
 
+from invisible_playwright_mcp.mcp import DEFAULT_BROWSER_ID, GONE, NOT_OPEN
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 PACKAGE = "invisible-playwright-mcp"
 NOTE = (
     "What invisible-playwright-mcp tells a model, at the version builder/mcp-requirements.lock pins, started as the "
-    "engine starts it (INVISIBLE_MCP_HOST_MANAGED=1): its instructions and its tools/list as served. Written by "
+    "engine starts it (INVISIBLE_MCP_HOST_MANAGED=1): its instructions and its tools/list as served, and the "
+    "sentences a tool answers instead of working (the package's NOT_OPEN and GONE, %s being the browser). Written by "
     "guest/image-builder/builder/capture-mcp-interface.py; capture it again when the lock changes that version."
 )
 
@@ -44,6 +48,8 @@ async def capture() -> dict:
         "package": PACKAGE,
         "version": started.serverInfo.version,
         "instructions": started.instructions,
+        "browser": DEFAULT_BROWSER_ID,
+        "answers": {"not_open": NOT_OPEN, "gone": GONE},
         "tools": [
             {
                 "name": tool.name,

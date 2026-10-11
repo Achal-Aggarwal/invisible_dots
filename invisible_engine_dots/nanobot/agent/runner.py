@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
@@ -26,12 +25,10 @@ from nanobot.agent.tools.execution import STATUS_PARKED, execute_tool_calls
 from nanobot.agent.tools.gate_types import ToolGate
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.transcript_metadata import IS_ERROR, METADATA_KEY
-from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
     LLMUsage,
-    ProviderCallContext,
     ToolCallRequest,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -90,12 +87,9 @@ class AgentRunSpec:
     transcript_builder: TranscriptBuilder
     consolidate_history: HistoryConsolidator
     hook: AgentHook | None = None
-    concurrent_tools: bool = False
-    workspace: Path | None = None
     session_key: str | None = None
     checkpoint_callback: CheckpointCallback | None = None
     injection_callback: InjectionCallback | None = None
-    events: EventSink = NO_EVENTS
     # Given the messages of a model request, returns the ones to send. For what the model must see
     # and the transcript must not keep (a screenshot): the result is made for that request, never stored
     # and never part of the history the next request starts from.
@@ -328,7 +322,6 @@ class AgentRunner:
             provider=spec.runtime.provider,
             model=spec.runtime.model,
             tools=spec.tools,
-            workspace=spec.workspace,
             session_key=spec.session_key,
             max_tool_result_chars=spec.max_tool_result_chars,
             context_window_tokens=spec.runtime.context_window_tokens,
@@ -337,7 +330,6 @@ class AgentRunner:
         request_state = ModelRequestState(
             config=governance_config,
             compaction=compaction,
-            events=spec.events,
         )
 
         async def end_length_segment(*, interrupted: bool) -> None:
@@ -427,7 +419,6 @@ class AgentRunner:
                         "name": tool_call.name,
                         "content": self.context_governor.normalize_tool_result(
                             governance_config,
-                            tool_call.id,
                             tool_call.name,
                             result,
                         ),
@@ -439,7 +430,6 @@ class AgentRunner:
                 results, new_events = await execute_tool_calls(
                     spec.tools,
                     response.tool_calls,
-                    concurrent=spec.concurrent_tools,
                     hook=hook,
                     context=context,
                     model_messages=messages_for_model,
@@ -674,13 +664,7 @@ class AgentRunner:
         kwargs["temperature"] = generation.temperature
         # The model's longest answer within what its window leaves (ContextGovernor.answer_tokens).
         kwargs["max_tokens"] = answer_tokens
-        kwargs["reasoning_effort"] = generation.reasoning_effort
         return kwargs
-
-    @staticmethod
-    def _provider_context(spec: AgentRunSpec) -> ProviderCallContext:
-        """Where a request reports its retries, and the preset its answer is attributed to."""
-        return ProviderCallContext(events=spec.events, response_preset=spec.runtime.model_preset or "")
 
     async def _request_model(
         self,
@@ -703,10 +687,7 @@ class AgentRunner:
             tools=tool_definitions,
             answer_tokens=request_state.answer_tokens,
         )
-        response = await spec.runtime.provider.chat_stream_with_retry(
-            **kwargs,
-            provider_context=self._provider_context(spec),
-        )
+        response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
         round_usage = self._record_request_usage(spec, request_state, response)
         dropped, all_dropped, original_finish_reason = (
             self._drop_malformed_tool_calls(response)
@@ -846,10 +827,7 @@ class AgentRunner:
             tools=None,
             answer_tokens=request_state.answer_tokens,
         )
-        return await spec.runtime.provider.chat_stream_with_retry(
-            **kwargs,
-            provider_context=self._provider_context(spec),
-        )
+        return await spec.runtime.provider.chat_stream_with_retry(**kwargs)
 
     @staticmethod
     def _max_iterations_fallback(spec: AgentRunSpec) -> str:

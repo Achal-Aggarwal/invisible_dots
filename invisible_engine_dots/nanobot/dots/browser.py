@@ -13,9 +13,9 @@ Three rules shape this module:
   dot's home and the engine's secrets are not in its environment. The directories are made and
   removed through the Computer for the same reason: `/home/dot/browsers` is `dot` 0700.
 * nanobot's MCP client stays in use. Each open identity has its own `MCPProvider` on a private
-  registry, so spawning, initialize, per-call timeout and the one retry of a transient error are the
-  client's. What is the manager's is when a process ends: it gets `on_terminated` instead of a silent
-  reconnect, because a restarted process has lost its browser.
+  registry, so spawning, initialize and the per-call timeout are the client's. What is the manager's
+  is when a process ends: the client calls `on_terminated` and never reconnects or repeats a call,
+  because a restarted process has lost its browser.
 * Nothing waits on a browser while holding anything others need. A session is `opening`, `open` or
   `closing`, and what moves it (a launch, a close) is a task of its own. The decisions that keep the slot
   count and the LRU order true (reserve a slot, pick what to close) are made in one step with no await
@@ -42,6 +42,7 @@ import re
 import sqlite3
 from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
@@ -63,22 +64,24 @@ from nanobot.dots.store import BrowserIdentityRow, DotStore
 # The name the private registry of one identity knows its one MCP server by.
 SERVER_NAME = "browser"
 
-# What `browser_open` answers when the browser started. Anything else that is not an error is the
-# engine's download progress, and it is asked again.
+# What invisible-playwright-mcp tells a model, at the version the image installs: written from the real server by
+# guest/image-builder/builder/capture-mcp-interface.py, and a test holds its version to the lock's.
+SERVER_INTERFACE: Mapping[str, Any] = json.loads(Path(__file__).with_name("invisible_playwright_mcp.json").read_bytes())
+
+# What `browser_open` answers when the browser started. Anything else that is not an error is the engine's download
+# progress, and it is asked again. The library has no constant for this answer (its `Work.open` writes it), so it is
+# the one sentence of the server matched here by its words.
 _OPENED = re.compile(r"\bbrowser is open\b", re.IGNORECASE)
 # What the server answers when its browser closed under it while the process lives on (Firefox crashed): its
-# GONE and NOT_OPEN sentences for the main browser (invisible_playwright_mcp/mcp/__init__.py, in the MCP's own
-# environment, so there is nothing importable to call; the browser smoke reads the real GONE sentence).
+# NOT_OPEN and GONE sentences for the main browser, as invisible_playwright_mcp.json records them from the pinned
+# package's own constants (the package lives in the MCP's own environment, so there is nothing importable here).
 # The sentence is the WHOLE error, behind the prefix FastMCP puts on what a tool raises. A phrase anywhere in
 # a longer error is not it: a failed click or select echoes text the page controls (the covering element's
 # text, the option asked for), and a page that says "the main browser is gone" must not close the identity.
 _BROWSER_LOST = re.compile(
     r"(?:Error executing tool \w+: )?(?:"
-    + re.escape("the main browser is not open. Call browser_open to open it.")
-    + "|"
-    + re.escape(
-        "the main browser is gone: it closed or crashed. Call browser_open to open it again; "
-        "it comes back as the same person."
+    + "|".join(
+        re.escape(SERVER_INTERFACE["answers"][answer] % SERVER_INTERFACE["browser"]) for answer in ("not_open", "gone")
     )
     + ")"
 )
@@ -113,7 +116,7 @@ ErrorCode = Literal[RouteErrorCode, "launch_failed"]
 class BrowserIdentityError(Exception):
     """A failure whose message is meant to be shown as it is, to the model or in an API answer.
 
-    `not_found`, `invalid` (a bad name or proxy, or an archived identity) and `limit` are the caller's;
+    `not_found`, `invalid` (a bad name or proxy) and `limit` are the caller's;
     `not_open` is an action on an identity that is not open; `busy` is a frame that found the identity
     in the middle of a call; `launch_failed`, `crashed` and `frame_failed` are the browser's.
     """
@@ -130,7 +133,7 @@ class BrowserIdentity:
 
     id: str
     name: str
-    status: Literal["available", "open", "archived"]
+    status: Literal["available", "open"]
     created_at: int
     last_used_at: int | None
     profile_path: str
@@ -348,8 +351,6 @@ class BrowserManager:
         """
         while True:
             row = self._require(identity_id)
-            if row.archived:
-                raise BrowserIdentityError("invalid", f'browser identity "{identity_id}" is archived')
             session = self._sessions.get(identity_id)
             if session is not None and session.state == "open":
                 self._touch(identity_id)
@@ -501,13 +502,10 @@ class BrowserManager:
     # ------------------------------------------------------------------
 
     def _view(self, row: BrowserIdentityRow) -> BrowserIdentity:
-        status: Literal["available", "open", "archived"] = "archived" if row.archived else "available"
-        if self.is_open(row.id):
-            status = "open"
         return BrowserIdentity(
             id=row.id,
             name=row.name,
-            status=status,
+            status="open" if self.is_open(row.id) else "available",
             created_at=row.created_at,
             last_used_at=row.last_used_at,
             profile_path=posixpath.join(self._browsers_dir, row.id, "profile"),

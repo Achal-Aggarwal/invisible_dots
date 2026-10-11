@@ -10,7 +10,7 @@ from nanobot.cron.types import CronJob, CronSchedule
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["add", "update", "remove", "disable"])
+@pytest.mark.parametrize("action", ["add", "remove"])
 @pytest.mark.parametrize("edit_from_callback", [True, False])
 async def test_edit_during_timer_execution_preserves_turn(
     tmp_path: Path, action: str, edit_from_callback: bool,
@@ -30,12 +30,8 @@ async def test_edit_during_timer_execution_preserves_turn(
     def edit_store() -> None:
         if action == "add":
             add_job("new-job")
-        elif action == "update":
-            service.update_job(other.id, message="updated")
-        elif action == "remove":
-            service.remove_job(other.id)
         else:
-            service.enable_job(other.id, False)
+            service.remove_job(other.id)
 
     async def on_job(job: CronJob) -> None:
         entered.set()
@@ -86,8 +82,7 @@ async def test_edit_during_timer_execution_preserves_turn(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["remove", "disable", "reschedule"])
-async def test_due_job_edited_while_waiting_is_skipped(tmp_path: Path, action: str) -> None:
+async def test_due_job_removed_while_waiting_is_skipped(tmp_path: Path) -> None:
     entered = asyncio.Event()
     release = asyncio.Event()
     finished = asyncio.Event()
@@ -119,16 +114,7 @@ async def test_due_job_edited_while_waiting_is_skipped(tmp_path: Path, action: s
 
         async with asyncio.timeout(2):
             await entered.wait()
-            if action == "remove":
-                assert service.remove_job(waiting.id) == "removed"
-            elif action == "disable":
-                service.enable_job(waiting.id, False)
-            else:
-                service.update_job(
-                    waiting.id, schedule=CronSchedule(kind="every", every_ms=7_200_000),
-                )
-            edited = service.get_job(waiting.id)
-            next_run = edited.state.next_run_at_ms if edited is not None else None
+            assert service.remove_job(waiting.id) == "removed"
             release.set()
             await finished.wait()
             while service._active_executions:
@@ -143,14 +129,7 @@ async def test_due_job_edited_while_waiting_is_skipped(tmp_path: Path, action: s
             assert completed is not None
             assert completed.state.last_status == "ok"
             assert len(completed.state.run_history) == 1
-        skipped = restored.get_job(waiting.id)
-        if action == "remove":
-            assert skipped is None
-        else:
-            assert skipped is not None
-            assert skipped.state.run_history == []
-            assert skipped.state.next_run_at_ms == next_run
-            assert skipped.enabled is (action == "reschedule")
+        assert restored.get_job(waiting.id) is None
         assert service._timer_task is not None
         assert not service._timer_task.done()
     finally:

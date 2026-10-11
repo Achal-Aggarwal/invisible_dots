@@ -21,7 +21,6 @@ class LLMRuntime:
     generation: GenerationSettings
     # The model's context window, prompt and answer together; None when it is not known.
     context_window_tokens: int | None
-    model_preset: str | None = None
 
     @classmethod
     def capture(
@@ -30,7 +29,6 @@ class LLMRuntime:
         model: str,
         *,
         context_window_tokens: int | None,
-        model_preset: str | None = None,
     ) -> LLMRuntime:
         """Capture provider defaults without retaining mutable generation state."""
         defaults = GenerationSettings()
@@ -41,14 +39,8 @@ class LLMRuntime:
             generation=GenerationSettings(
                 temperature=getattr(generation, "temperature", defaults.temperature),
                 max_tokens=getattr(generation, "max_tokens", defaults.max_tokens),
-                reasoning_effort=getattr(
-                    generation,
-                    "reasoning_effort",
-                    defaults.reasoning_effort,
-                ),
             ),
             context_window_tokens=context_window_tokens,
-            model_preset=model_preset,
         )
 
     @classmethod

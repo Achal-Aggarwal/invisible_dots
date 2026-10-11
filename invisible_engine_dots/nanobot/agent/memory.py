@@ -236,7 +236,6 @@ class Consolidator:
                     tools=request_tools,
                     temperature=runtime.generation.temperature,
                     max_tokens=answer_limit(runtime.context_window_tokens, runtime.generation.max_tokens, estimated),
-                    reasoning_effort=runtime.generation.reasoning_effort,
                 )
             except Exception:
                 phase = "provider call" if attempt == 0 else "tool-call recovery"

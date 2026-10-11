@@ -22,7 +22,6 @@ async def run_tool(registry: ToolRegistry, name: str, params: Any) -> Any:
     results, events = await execute_tool_calls(
         registry,
         [ToolCallRequest(id=f"call-{uuid.uuid4().hex[:8]}", name=name, arguments=params)],
-        concurrent=False,
         hook=AgentHook(),
         context=AgentHookContext(iteration=0, messages=[]),
         gate=AllowAllGate(),

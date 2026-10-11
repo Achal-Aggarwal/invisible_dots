@@ -75,8 +75,6 @@ class ScriptedProvider(LLMProvider):
         self.script = list(script)
         self.default_cost = default_cost
         self.requests: list[dict[str, Any]] = []
-        # The ProviderCallContext of each request, kept apart from `requests`, which tests serialize.
-        self.contexts: list[Any] = []
         self.generation = GenerationSettings(max_tokens=max_tokens)
         # What the stand-in publishes for every model (a test changes it, or names a model's own in `limits`): the
         # window of the smaller models Dots run on (kimi-k2 publishes 131072). A turn with every permission, the
@@ -102,7 +100,6 @@ class ScriptedProvider(LLMProvider):
                 "max_tokens": kwargs.get("max_tokens"),
             }
         )
-        self.contexts.append(kwargs.get("provider_context"))
         if not self.script:
             raise AssertionError(f"the model was asked {len(self.requests)} times, the script has fewer answers")
         entry = self.script.pop(0)

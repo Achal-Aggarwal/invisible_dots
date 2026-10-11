@@ -90,18 +90,12 @@ def make_run_spec(provider: LLMProvider, **kwargs: Any) -> AgentRunSpec:
         candidate = getattr(provider_generation, "max_tokens", None)
         max_tokens = candidate if isinstance(candidate, int) else defaults.max_tokens
 
-    reasoning_effort = kwargs.pop("reasoning_effort", None)
-    if reasoning_effort is None:
-        candidate = getattr(provider_generation, "reasoning_effort", None)
-        reasoning_effort = candidate if isinstance(candidate, str) else None
-
     runtime = LLMRuntime(
         provider=provider,
         model=model,
         generation=GenerationSettings(
             temperature=temperature,
             max_tokens=max_tokens,
-            reasoning_effort=reasoning_effort,
         ),
         context_window_tokens=context_window_tokens,
     )

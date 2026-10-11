@@ -19,7 +19,7 @@ import pytest
 from fakes.browser_manager import mcp_home
 from fakes.dot_config import ALLOW_ALL, runtime_config_body
 from fakes.engine_harness import EngineHarness, user_message
-from fakes.fake_mcp_server import write_control
+from fakes.fake_mcp_server import read_record, write_control
 from fakes.scripted_provider import call, calls, says
 from loguru import logger
 
@@ -712,7 +712,11 @@ class TestBrowserIdentityActions:
         await api.h.browser.launch(identity["id"])
 
         call = asyncio.create_task(api.h.browser.call_tool(identity["id"], "browser_navigate", {"url": "slow://x"}))
-        await asyncio.sleep(0.1)
+        # The server has the call (it answers it 0.3 s later), so the identity is held by it.
+        home = mcp_home(api.h.tmp_path, identity["id"])
+        async with asyncio.timeout(5):
+            while not any(entry.get("args", {}).get("url") == "slow://x" for entry in read_record(home)):
+                await asyncio.sleep(0.01)
         busy = await api.call("GET", f"/browser-identities/{identity['id']}/frame")
         await call
 

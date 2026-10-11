@@ -236,9 +236,6 @@ class CronTool(Tool):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
-            if j.payload.kind == "system_event":
-                parts.append("  Purpose: System-managed internal job.")
-                parts.append("  Protected: visible for inspection, but cannot be removed.")
             parts.extend(self._format_state(j.state, j.schedule))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
@@ -249,9 +246,4 @@ class CronTool(Tool):
         result = self._cron.remove_job(job_id)
         if result == "removed":
             return f"Removed job {job_id}"
-        if result == "protected":
-            return (
-                f"Cannot remove job `{job_id}`.\n"
-                "This is a protected system-managed cron job."
-            )
         return f"Job {job_id} not found"
