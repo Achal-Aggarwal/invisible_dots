@@ -34,7 +34,8 @@ describe("event type lists", () => {
 
   it("match section 5.4", () => {
     expect(INBOUND_EVENT_TYPES).toEqual(["user.message", "task.created", "approval.received", "system.event"]);
-    expect(OUTBOUND_EVENT_TYPES).toHaveLength(15);
+    expect(OUTBOUND_EVENT_TYPES).toHaveLength(16);
+    expect(OUTBOUND_EVENT_TYPES).toContain("mcp.server.added");
     expect(OUTBOUND_EVENT_TYPES).toContain("browser.identity.launched");
     expect(OUTBOUND_EVENT_TYPES).toContain("automation.next_run");
     expect(OUTBOUND_EVENT_TYPES).toContain("memory.updated");

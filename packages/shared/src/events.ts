@@ -46,6 +46,7 @@ export const OUTBOUND_EVENT_TYPES = [
   ...IDENTITY_EVENT_TYPES,
   "automation.next_run",
   "memory.updated",
+  "mcp.server.added",
 ] as const;
 export type OutboundEventType = (typeof OUTBOUND_EVENT_TYPES)[number];
 
@@ -60,6 +61,7 @@ export const HOST_EVENT_TYPES = [
   "task.cancelled",
   "approval.resolved",
   "guest.event.refused",
+  "mcp.server.refused",
   "channel.status",
   "channel.peer.paired",
   "channel.changed",
@@ -223,6 +225,14 @@ export interface OutboundEventDataMap {
    * failed since the last of these).
    */
   "memory.updated": { conversations: number; changed: boolean } & SpentUsd;
+  /**
+   * The Dot added an MCP server to its own config (`add_mcp_server`, which `mcp.servers.add` allowed or the person
+   * approved): the call's arguments as it made them, `name` and the entry (`command`, `args`, `env` or `url`,
+   * `headers`, and `secrets`, names only) with an optional `reason`. The host writes the server into the config only
+   * when the config allows the permission or the person approved exactly these arguments, and says so otherwise
+   * (`mcp.server.refused`).
+   */
+  "mcp.server.added": { arguments: Record<string, unknown> };
 }
 
 /**
@@ -267,6 +277,8 @@ export interface HostEventDataMap {
   /** The person paused, resumed or removed a channel (a removed one has no status left to report): every view of the channel follows it. */
   "channel.changed": { kind: ChannelKind; change: ChannelChange };
   "guest.event.refused": RefusedEvent;
+  /** The host did not add the MCP server a Dot asked for (`mcp.server.added`), and why. */
+  "mcp.server.refused": { name: string; reason: string };
 }
 
 export type InboundEvent<T extends InboundEventType = InboundEventType> = {
@@ -408,6 +420,7 @@ export const outboundEventSchema = z.discriminatedUnion("type", [
     type: z.literal("memory.updated"),
     data: z.object({ conversations: z.number().int().nonnegative(), changed: z.boolean(), spent_usd: spentUsd }),
   }),
+  z.object({ ...outboundBase, type: z.literal("mcp.server.added"), data: z.object({ arguments: z.record(z.string(), z.unknown()) }) }),
 ]);
 
 /** Validate an outbound event read from the guest stream; throws with every problem listed. */

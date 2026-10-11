@@ -22,6 +22,7 @@ describe("the permission registry", () => {
       "browser.read",
       "browser.act",
       "automations",
+      "mcp.servers.add",
     ]);
   });
 
