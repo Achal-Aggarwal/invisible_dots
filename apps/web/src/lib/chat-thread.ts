@@ -6,46 +6,9 @@
  * Only the chat's own turns are drawn here: a tool call or an approval that names a task belongs to that task's
  * story (the Tasks page), not to the conversation.
  */
-import { toolLabel, type ToolFamily } from "./events/tool-labels";
-import type { ApprovalOutcome } from "./task-events";
-import { mergeEvents } from "./event-log";
+import { mergeEvents } from "@invisible-dots/sdk";
+import { stepsOf, type ApprovalStep, type ToolStep } from "./steps";
 import type { ChatMessage, StoredEvent } from "./types";
-
-/**
- * How a tool call ended. The engine reports a call when it has ended, so a call that is still running has no event
- * yet (the chat's working row says the Dot is busy); a call that waits for the person is the approval's step.
- */
-export type ToolState = "ok" | "error" | "denied" | "interrupted";
-
-export interface ToolStep {
-  kind: "tool";
-  id: number;
-  at: string;
-  tool: string;
-  label: string;
-  family: ToolFamily;
-  /** What the call acted on, as the engine reported it (one line); "" when it named nothing. */
-  target: string;
-  state: ToolState;
-  durationMs: number;
-}
-
-export interface ApprovalStep {
-  kind: "approval";
-  id: number;
-  at: string;
-  approvalId: string;
-  tool: string;
-  label: string;
-  family: ToolFamily;
-  reason: string;
-  /** What the call needs the person's permission for, and with which arguments: what the approval card shows. */
-  permission: string;
-  arguments: Record<string, unknown>;
-  outcome: ApprovalOutcome;
-  /** The answer also allowed the permission for good. */
-  always: boolean;
-}
 
 export type ActivityItem = ToolStep | ApprovalStep;
 
@@ -64,79 +27,15 @@ export function isChatActivityEvent(event: Pick<StoredEvent, "type">): boolean {
 /** Runs of tool steps longer than this fold into one line the person can open. */
 export const CLUSTER_AFTER = 3;
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function hasTask(event: Pick<StoredEvent, "data">): boolean {
-  return text(event.data?.task_id) !== "";
-}
-
-export function toolStateOf(data: Record<string, unknown>): ToolState {
-  if (data.interrupted === true) return "interrupted";
-  if (data.decision === "deny") return "denied";
-  return data.ok === true ? "ok" : "error";
+/** Whether a call or an approval is the chat's: one that names a task is that task's. */
+function isTheChats(event: Pick<StoredEvent, "data">): boolean {
+  const taskId = event.data?.task_id;
+  return typeof taskId !== "string" || taskId === "";
 }
 
 /** The steps of the chat's turns in the order they happened, from the events `isChatActivityEvent` accepts. */
 export function activityOf(events: readonly StoredEvent[]): ActivityItem[] {
-  const items: ActivityItem[] = [];
-  const approvals = new Map<string, ApprovalStep>();
-  for (const event of [...events].sort((a, b) => a.id - b.id)) {
-    const d = event.data ?? {};
-    const base = { id: event.id, at: event.created_at };
-    switch (event.type) {
-      case "tool.called": {
-        if (hasTask(event)) break;
-        const tool = text(d.tool);
-        const { label, family } = toolLabel(tool, d.tty === true);
-        items.push({
-          ...base,
-          kind: "tool",
-          tool,
-          label,
-          family,
-          target: text(d.target),
-          state: toolStateOf(d),
-          durationMs: typeof d.duration_ms === "number" ? d.duration_ms : 0,
-        });
-        break;
-      }
-      case "approval.requested": {
-        if (hasTask(event)) break;
-        const tool = text(d.tool);
-        const { label, family } = toolLabel(tool);
-        const step: ApprovalStep = {
-          ...base,
-          kind: "approval",
-          approvalId: text(d.approval_id),
-          tool,
-          label,
-          family,
-          reason: text(d.reason),
-          permission: text(d.permission),
-          arguments: typeof d.arguments === "object" && d.arguments !== null && !Array.isArray(d.arguments) ? (d.arguments as Record<string, unknown>) : {},
-          outcome: "waiting",
-          always: false,
-        };
-        approvals.set(step.approvalId, step);
-        items.push(step);
-        break;
-      }
-      case "approval.resolved": {
-        // It names only the approval: one that was not the chat's is not in the map.
-        const step = approvals.get(text(d.approval_id));
-        if (step) {
-          step.outcome = d.decision === "approve" ? "approved" : "rejected";
-          step.always = d.always === true;
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-  return items;
+  return stepsOf([...events].sort((a, b) => a.id - b.id), isTheChats);
 }
 
 /** The thread: messages and activity merged by event id; an assistant message starts a group after anything but another assistant message. */

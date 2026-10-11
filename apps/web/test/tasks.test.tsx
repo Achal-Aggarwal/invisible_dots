@@ -445,9 +445,9 @@ describe("the task drawer", () => {
     await waitFor(() => expect(within(drawer).getByText("Collecting the figures")).toBeTruthy());
     expect(within(drawer).queryByText("Another task's line")).toBeNull();
     expect(within(drawer).getByText("python3 collect.py")).toBeTruthy();
-    expect(within(drawer).getByText(/ok, 2s/)).toBeTruthy();
+    expect(within(drawer).getByText(/done, 2.5 s/)).toBeTruthy();
     expect(within(drawer).getByText(/Allowed:/)).toBeTruthy();
-    // The engine's tool names are in the words of the chat (lib/events/tool-labels.ts), the name being the line's title.
+    // The engine's tool names are in the words of the chat (TOOL_LABELS of packages/shared), the name being the line's title.
     expect(within(drawer).getByText("Ran a command").getAttribute("title")).toBe("exec");
     expect(within(drawer).getByText("wrote a file").getAttribute("title")).toBe("write_file");
     expect(within(drawer).getByText("$0.73")).toBeTruthy();

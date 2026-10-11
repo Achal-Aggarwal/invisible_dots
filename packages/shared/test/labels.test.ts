@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { TOOL_LABELS, toolLabel } from "../src/lib/events/tool-labels";
+import { accountLabel, permissionPhrase, TOOL_LABELS, toolLabel } from "../src/index.js";
 
 /** The tool names of the engine's table: the keys of `TOOL_PERMISSIONS` in nanobot/dots/permissions.py. */
 function engineTools(): string[] {
@@ -51,5 +51,24 @@ describe("the words for the engine's tools", () => {
     // Not a lookup on the object's own prototype.
     expect(toolLabel("constructor")).toEqual({ label: "Called constructor", ask: "call constructor", family: "other" });
     expect(toolLabel("toString").family).toBe("other");
+  });
+});
+
+describe("the words for a permission an approval names", () => {
+  it("say its name and how risky it is, an MCP server's included, and keep a name with no words as it is", () => {
+    expect(permissionPhrase("computer.exec")).toBe("Run commands (high risk)");
+    expect(permissionPhrase("files.read")).toBe("Read files (low risk)");
+    expect(permissionPhrase("mcp.time")).toBe("MCP server time (high risk)");
+    expect(permissionPhrase("exec.run")).toBe("exec.run");
+  });
+});
+
+describe("the account of a channel", () => {
+  it("is a bot's @name and a number with its plus, and nothing before the channel reports one", () => {
+    expect(accountLabel("telegram", "dot_helper_bot")).toBe("@dot_helper_bot");
+    expect(accountLabel("whatsapp", "15550001111")).toBe("+15550001111");
+    expect(accountLabel("whatsapp", "+15550001111")).toBe("+15550001111");
+    expect(accountLabel("telegram", null)).toBeNull();
+    expect(accountLabel("whatsapp", "")).toBeNull();
   });
 });

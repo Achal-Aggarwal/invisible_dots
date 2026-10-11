@@ -3,8 +3,8 @@
  * drawer. The log is the one record of both (the task row keeps only its state, result and spend). Both are read by
  * the task (`task_id`, indexed in the database), so what it costs does not grow with the age of the Dot.
  */
-import type { InvisibleDotsClient } from "@invisible-dots/sdk";
-import { mergeEvents, readEventLog, readRecentEvents } from "./event-log";
+import { mergeEvents, readEventLog, readRecentEvents, type InvisibleDotsClient } from "@invisible-dots/sdk";
+import { stepsOf, type ApprovalStep, type ToolStep } from "./steps";
 import type { StoredEvent } from "./types";
 
 function text(value: unknown): string {
@@ -59,85 +59,41 @@ export async function readTaskProgress(client: Pick<InvisibleDotsClient, "events
   return newest === undefined ? null : progressOfEvent(newest);
 }
 
-export type ApprovalOutcome = "waiting" | "approved" | "rejected";
-
 export type StoryStep =
   | { kind: "created"; id: number; at: string; description: string; priority: number | null }
   | { kind: "started"; id: number; at: string }
   | { kind: "progress"; id: number; at: string; text: string }
-  | { kind: "tool"; id: number; at: string; tool: string; target: string; decision: string; ok: boolean; interrupted: boolean; tty: boolean; durationMs: number }
-  | { kind: "approval"; id: number; at: string; approvalId: string; tool: string; reason: string; outcome: ApprovalOutcome; note: string; always: boolean }
+  | ToolStep
+  | ApprovalStep
   | { kind: "completed"; id: number; at: string; summary: string }
   | { kind: "failed"; id: number; at: string; error: string }
   | { kind: "cancelled"; id: number; at: string };
 
+/** A step of the task's own life (created, started, said something, ended); null for an event that is none. */
+function lifeStep(event: StoredEvent): StoryStep | null {
+  const base = { id: event.id, at: event.created_at };
+  const d = event.data ?? {};
+  switch (event.type) {
+    case "task.created":
+      return { ...base, kind: "created", description: text(d.description), priority: typeof d.priority === "number" ? d.priority : null };
+    case "task.started":
+      return { ...base, kind: "started" };
+    case "task.progress":
+      return { ...base, kind: "progress", text: text(d.text) };
+    case "task.completed":
+      return { ...base, kind: "completed", summary: text(d.summary) };
+    case "task.failed":
+      return { ...base, kind: "failed", error: text(d.error) };
+    case "task.cancelled":
+      return { ...base, kind: "cancelled" };
+    default:
+      return null;
+  }
+}
+
 /** The steps of one task, in the order they happened. An approval is one step: asked, and then how it was answered. */
 export function storyOf(events: readonly StoredEvent[], taskId: string): StoryStep[] {
-  const steps: StoryStep[] = [];
-  const approvals = new Map<string, Extract<StoryStep, { kind: "approval" }>>();
-  for (const event of events) {
-    const base = { id: event.id, at: event.created_at };
-    const d = event.data ?? {};
-    if (taskIdOf(event) !== taskId) continue;
-    switch (event.type) {
-      case "task.created":
-        steps.push({ ...base, kind: "created", description: text(d.description), priority: typeof d.priority === "number" ? d.priority : null });
-        break;
-      case "task.started":
-        steps.push({ ...base, kind: "started" });
-        break;
-      case "task.progress":
-        steps.push({ ...base, kind: "progress", text: text(d.text) });
-        break;
-      case "tool.called":
-        steps.push({
-          ...base,
-          kind: "tool",
-          tool: text(d.tool),
-          target: text(d.target),
-          decision: text(d.decision),
-          ok: d.ok === true,
-          interrupted: d.interrupted === true,
-          tty: d.tty === true,
-          durationMs: typeof d.duration_ms === "number" ? d.duration_ms : 0,
-        });
-        break;
-      case "approval.requested": {
-        const step: Extract<StoryStep, { kind: "approval" }> = {
-          ...base,
-          kind: "approval",
-          approvalId: text(d.approval_id),
-          tool: text(d.tool),
-          reason: text(d.reason),
-          outcome: "waiting",
-          note: "",
-          always: false,
-        };
-        approvals.set(step.approvalId, step);
-        steps.push(step);
-        break;
-      }
-      case "approval.resolved": {
-        const step = approvals.get(text(d.approval_id));
-        if (step) {
-          step.outcome = d.decision === "approve" ? "approved" : "rejected";
-          step.note = text(d.note);
-          step.always = d.always === true;
-        }
-        break;
-      }
-      case "task.completed":
-        steps.push({ ...base, kind: "completed", summary: text(d.summary) });
-        break;
-      case "task.failed":
-        steps.push({ ...base, kind: "failed", error: text(d.error) });
-        break;
-      case "task.cancelled":
-        steps.push({ ...base, kind: "cancelled" });
-        break;
-      default:
-        break;
-    }
-  }
-  return steps;
+  const own = events.filter((event) => taskIdOf(event) === taskId);
+  const life = own.flatMap((event) => lifeStep(event) ?? []);
+  return [...life, ...stepsOf(own, () => true)].sort((a, b) => a.id - b.id);
 }

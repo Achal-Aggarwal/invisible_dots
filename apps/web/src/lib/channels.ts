@@ -36,13 +36,6 @@ export function channelState(record: Pick<ChannelRecord, "enabled" | "status">):
   return record.enabled ? STATUS_VIEW[record.status] : { label: "Paused", tone: "neutral" };
 }
 
-/** The account of a channel as a person writes it: a bot's `@name`, a phone number with its plus; null until the channel reports one. */
-export function accountLabel(kind: ChannelKind, account: string | null): string | null {
-  if (account === null || account === "") return null;
-  if (kind === "telegram") return `@${account}`;
-  return account.startsWith("+") ? account : `+${account}`;
-}
-
 /** Where a channel's account can be opened in a browser: a Telegram bot's page; WhatsApp has no page for a number. */
 export function accountHref(kind: ChannelKind, account: string | null): string | null {
   return kind === "telegram" && account !== null && /^[A-Za-z0-9_]+$/.test(account) ? `https://t.me/${account}` : null;

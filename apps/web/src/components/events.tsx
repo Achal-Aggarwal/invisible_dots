@@ -27,7 +27,7 @@ export function DotEventScope({ dotId, children }: { dotId: string; children: Re
   return <ScopeContext.Provider value={dotId}>{children}</ScopeContext.Provider>;
 }
 
-/** One SSE connection for every Dot, kept for as long as the signed-in pages are open and shared by every component below it. */
+/** One SSE connection for every Dot, kept for as long as the app's pages are open and shared by every component below it. */
 export function EventStreamProvider({ children }: { children: ReactNode }) {
   const listeners = useRef(new Set<Listener>());
   const [status, setStatus] = useState<StreamStatus>("connecting");

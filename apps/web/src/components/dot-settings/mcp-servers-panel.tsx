@@ -178,7 +178,7 @@ export function McpServersPanel({ draft, saved, change, errorOf, dotId, computer
     <Panel
       id="mcp-servers"
       title="MCP servers"
-      description="Programs and services whose tools the Dot may use, as Claude Code and Codex use them. Only you add one; the Dot can install a program a server needs. Each server's permission is under Permissions and tools."
+      description="Programs and services whose tools the Dot may use, as Claude Code and Codex use them. You add one here, or the Dot adds one itself once it has installed the program the server needs, asking you first unless you allowed it. Only you change or remove one. Each server's permission is under Permissions and tools."
     >
       {names.length === 0 ? <p className="text-sm text-muted-foreground">No MCP server.</p> : null}
       <ul className="divide-y rounded-lg border">

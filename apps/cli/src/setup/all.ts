@@ -27,8 +27,6 @@ export interface SetupAllDeps {
   /** `image build`: the exit code, or a rejection with the reason. */
   images(): Promise<number>;
   env: Record<string, string | undefined>;
-  /** Where `invisible-dots server` writes the API token, which the web client asks for. */
-  tokenPath: string;
   /** Aborted by Ctrl-C. Checked between steps: only `image build` can stop in the middle of one. */
   signal?: AbortSignal;
 }
@@ -86,9 +84,7 @@ export async function runSetupAll(deps: SetupAllDeps): Promise<number> {
   out(`
 This computer is ready. To use it:
   1. start the server and leave it running:   invisible-dots server
-  2. open ${webAddress(deps.env)} in your browser and sign in with the first line of
-     ${deps.tokenPath}
-     (the server creates that file the first time it starts)
+  2. open ${webAddress(deps.env)} in your browser
   3. the page asks for your OpenRouter key, then lets you create your first Dot.
 `);
   return EXIT.ok;

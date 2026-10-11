@@ -44,7 +44,7 @@ interface ShellData {
 const Context = createContext<ShellData | null>(null);
 
 /**
- * What every signed-in page shares: the Dots, the approvals that wait, the tasks that failed lately, the channels that
+ * What every page of the app shares: the Dots, the approvals that wait, the tasks that failed lately, the channels that
  * need linking again, what the live stream says about each Dot, and whether the control plane answers. The rail, the
  * Dot header, the document title, the favicon and the setup pages
  * all read it, so they agree and the control plane is asked once, not once per component.

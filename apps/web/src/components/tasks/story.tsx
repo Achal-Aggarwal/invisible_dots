@@ -1,8 +1,8 @@
 "use client";
 
 import { BanIcon, CheckCircle2Icon, CircleDotIcon, FlagIcon, HandIcon, MessageSquareIcon, PlayIcon, TerminalIcon, XCircleIcon, type LucideIcon } from "lucide-react";
-import { toolLabel } from "../../lib/events/tool-labels";
-import { formatDate, formatDuration } from "../../lib/format";
+import { formatDate, formatMillis } from "../../lib/format";
+import { APPROVAL_WORD, TOOL_OUTCOME } from "../../lib/steps";
 import type { StoryStep } from "../../lib/task-events";
 import { priorityLabel } from "../../lib/task-view";
 import { relativeTime } from "../../lib/time";
@@ -22,14 +22,8 @@ const ICON: Record<StoryStep["kind"], LucideIcon> = {
 
 const ICON_TONE: Partial<Record<StoryStep["kind"], string>> = { completed: "text-ok", failed: "text-danger", approval: "text-warn" };
 
-/** How a tool call ended, in a word: it ran, it failed, it was refused, or it was cut off. */
-function toolOutcome(step: Extract<StoryStep, { kind: "tool" }>): { word: string; bad: boolean } {
-  if (step.interrupted) return { word: "interrupted", bad: true };
-  if (step.decision === "deny") return { word: "denied", bad: true };
-  return step.ok ? { word: "ok", bad: false } : { word: "failed", bad: true };
-}
-
-const APPROVAL_WORD = { waiting: "Waiting for an answer", approved: "Allowed", rejected: "Denied" } as const;
+/** The color of how a call ended: only what is not an ordinary success has one. */
+const OUTCOME_CLASS = { neutral: "text-muted-foreground", info: "text-muted-foreground", ok: "text-muted-foreground", warn: "text-warn", error: "text-danger" } as const;
 
 function Body({ step }: { step: StoryStep }) {
   switch (step.kind) {
@@ -44,16 +38,16 @@ function Body({ step }: { step: StoryStep }) {
     case "progress":
       return <span className="whitespace-pre-wrap">{step.text}</span>;
     case "tool": {
-      const outcome = toolOutcome(step);
+      const outcome = TOOL_OUTCOME[step.state];
       return (
         <>
           <span title={step.tool} className="font-medium">
-            {toolLabel(step.tool, step.tty).label}
+            {step.label}
           </span>
           {step.target ? <span className="break-all text-muted-foreground"> {step.target}</span> : null}{" "}
-          <span className={cn("text-xs", outcome.bad ? "text-danger" : "text-muted-foreground")}>
+          <span className={cn("text-xs", OUTCOME_CLASS[outcome.tone])}>
             {outcome.word}
-            {step.durationMs > 0 ? `, ${formatDuration(step.durationMs / 1000)}` : ""}
+            {step.durationMs > 0 ? `, ${formatMillis(step.durationMs)}` : ""}
           </span>
         </>
       );
@@ -65,7 +59,7 @@ function Body({ step }: { step: StoryStep }) {
             {APPROVAL_WORD[step.outcome]}
             {step.outcome === "approved" && step.always ? " for good" : ""}:
           </span>{" "}
-          <span title={step.tool}>{toolLabel(step.tool).label.toLowerCase()}</span>
+          <span title={step.tool}>{step.label.toLowerCase()}</span>
           {step.reason ? <span className="text-muted-foreground"> {step.reason}</span> : null}
           {step.note ? <span className="block text-xs text-muted-foreground">Note: {step.note}</span> : null}
         </>

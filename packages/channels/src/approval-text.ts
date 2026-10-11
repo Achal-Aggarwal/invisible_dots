@@ -1,6 +1,7 @@
 /**
  * What an approval prompt says in a chat, and what it says once the approval is settled. One owner of the
- * wording, so every channel shows the same thing. Plain text: a channel adds its own means of answering.
+ * wording, so every channel shows the same thing, and the question in the words of the web client's approval card
+ * (`toolLabel`, `permissionPhrase`). Plain text: a channel adds its own means of answering.
  *
  * The prompt goes through a third party that can read it (a chat is not end-to-end encrypted), so the arguments of the
  * tool, which can hold private data, are cut to `APPROVAL_PROMPT_TEXT_MAX` characters. A secret that has no place in an approval
@@ -9,7 +10,7 @@
  * is how a model that was talked into it sends data out, so it is what the approver has to see (a person who does not want
  * it in a chat turns `show_arguments` off).
  */
-import { APPROVAL_PROMPT_TEXT_MAX, type ApprovalRecord } from "@invisible-dots/shared";
+import { APPROVAL_PROMPT_TEXT_MAX, permissionPhrase, toolLabel, type ApprovalRecord } from "@invisible-dots/shared";
 
 const MORE = "...";
 
@@ -19,7 +20,7 @@ function cut(text: string, max: number): string {
 }
 
 export function approvalPromptText(approval: ApprovalRecord, showArguments: boolean): string {
-  const lines = [`The Dot asks to use ${approval.tool} (permission ${approval.permission}).`];
+  const lines = [`The Dot wants to ${toolLabel(approval.tool).ask}.`, `Permission: ${permissionPhrase(approval.permission)}`];
   const reason = cut(approval.reason, APPROVAL_PROMPT_TEXT_MAX);
   if (reason !== "") lines.push(`Reason: ${reason}`);
   const args = cut(JSON.stringify(approval.arguments), APPROVAL_PROMPT_TEXT_MAX);

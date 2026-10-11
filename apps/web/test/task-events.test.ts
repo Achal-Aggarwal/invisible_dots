@@ -139,14 +139,14 @@ describe("storyOf", () => {
     expect(story.map((s) => s.kind)).toEqual(["created", "started", "progress", "tool", "approval", "tool", "tool", "completed"]);
     expect(story[0]).toMatchObject({ kind: "created", description: "Write it", priority: 10 });
     expect(story[2]).toMatchObject({ kind: "progress", text: "Reading the sources" });
-    expect(story[3]).toMatchObject({ kind: "tool", tool: "exec", target: "ls -la", ok: true, durationMs: 1200, interrupted: false });
+    expect(story[3]).toMatchObject({ kind: "tool", tool: "exec", label: "Ran a command", target: "ls -la", state: "ok", durationMs: 1200 });
     expect(story[7]).toMatchObject({ kind: "completed", summary: "Done: **report.md**" });
   });
 
-  it("keeps whether a call started a terminal session", () => {
+  it("says a call that started a terminal session as that", () => {
     const [step] = storyOf([event("tool.called", { task_id: "t9", tool: "exec", decision: "allow", ok: true, duration_ms: 5, target: "python3", tty: true })], "t9");
-    expect(step).toMatchObject({ kind: "tool", tty: true });
-    expect(storyOf(events, "t1")[3]).toMatchObject({ kind: "tool", tty: false });
+    expect(step).toMatchObject({ kind: "tool", label: "Started a terminal session" });
+    expect(storyOf(events, "t1")[3]).toMatchObject({ kind: "tool", label: "Ran a command" });
   });
 
   it("folds an approval and its answer into one step, found by the approval's id", () => {
@@ -158,8 +158,8 @@ describe("storyOf", () => {
 
   it("keeps a refused call and an interrupted one for what they are", () => {
     const tools = storyOf(events, "t1").filter((s) => s.kind === "tool");
-    expect(tools[1]).toMatchObject({ tool: "browser_navigate", decision: "deny", ok: false });
-    expect(tools[2]).toMatchObject({ interrupted: true, ok: false });
+    expect(tools[1]).toMatchObject({ tool: "browser_navigate", state: "denied" });
+    expect(tools[2]).toMatchObject({ tool: "exec", state: "interrupted" });
   });
 
   it("ends a failed task with its error and a cancelled one with that", () => {

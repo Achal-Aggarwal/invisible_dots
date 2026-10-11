@@ -2243,10 +2243,10 @@ The pages are React with Tailwind CSS 4. `src/app/tokens.css` is the one place
 that holds a color, a radius or a typeface (a light and a dark set, each pair
 checked for WCAG AA contrast by a test), `globals.css` maps it into Tailwind,
 and the primitives in `src/components/ui/` are shadcn/ui source, copied in
-(`THIRD_PARTY_NOTICES.md`). Every signed-in page sits in one frame: the rail
+(`THIRD_PARTY_NOTICES.md`). Every page sits in one frame: the rail
 (the Dots with a ring around each avatar that says what it is doing, the Inbox
-with what needs the person, the state of the API and of the live stream, the theme,
-sign out) and, for a Dot, its header and tab bar. One live stream serves all of
+with what needs the person, the state of the API and of the live stream, the theme)
+and, for a Dot, its header and tab bar. One live stream serves all of
 it; `lib/attention.ts` is the single owner of what needs the person, and the
 rail badges, the avatar ring, the tab title and the favicon all read it. There
 is no other stylesheet: every screen is utilities over the tokens. The browser tests (`apps/web/e2e`, Playwright) start the
@@ -2254,8 +2254,9 @@ real control plane in-process over the fake VM layer and the built web client
 against it (`e2e/harness.ts`), so a test drives what a Dot's computer does.
 
 Home (`/`) is a card per Dot: its avatar ring and name, the state with the
-recorded reason beside an ERROR, the model, what it spent today, the approvals
-that wait, Open chat and the computer's power menu. Each card's spend pill is
+recorded reason beside an ERROR, the model, what it spent today, its last
+activity (the newest chat, task, tool, approval or browser event, one
+`order=desc&limit=1` read and then the stream), the approvals that wait, Open chat and the computer's power menu. Each card's spend pill is
 scoped to its own Dot, so a message of one Dot re-reads only that Dot's usage.
 Search appears above six Dots, and with no Dot the page invites the first, and,
 while this computer is not ready for a Dot, shows the setup checklist under the
@@ -2265,20 +2266,18 @@ an elevated terminal and an image build takes long, so they stay commands the
 person runs), and the key field when no key is stored. The checks run again
 when the person returns to the window while something is missing, and the
 checklist stays, turned green, once the last thing is done. A ready host shows
-none of it. The card has no "last activity": no route returns the newest event
-yet.
+none of it.
 
 Settings (`/settings`, in the rail) are the host's, not a Dot's: the same checks
 (`useHostChecks` is the one list the checklist, this page and the create form's
 preflight draw), the OpenRouter key (a write-only field over
 `PUT /api/secrets/openrouter`; whether one is stored comes from the health
 answer, which the shell shares and asks again after a save, so the rail agrees
-at once; the answer says how many running Dots got it), the theme, Sign out
-(`DELETE /session`) and About: the version, the database kind, the data
+at once; the answer says how many running Dots got it), the theme and About:
+the version, the database kind, the data
 directory and the logs directory, which `GET /api/health` reports for the
 purpose (`database_kind`, `data_dir`, `logs_dir`), and `invisible-dots logs
-<dot>` for a Dot's own logs. The login page is a card with the token field
-focused; it is outside the shell and asks the API nothing.
+<dot>` for a Dot's own logs.
 
 Create a Dot (`/new`) is a form in three steps (Identity, Brain, Computer and
 safety) with sliders inside `CONFIG_BOUNDS`, the idle timeout, the Careful,
@@ -2333,8 +2332,8 @@ list with its state, its result as markdown or the reason it failed, and its
 story. The task route knows a task by its id alone, so a task of another Dot
 opened under this Dot's address is shown as missing. The story and the progress lines come from the Dot's event log, which
 the page reads from its start, asking only for the event types of a task's
-story (`lib/event-log.ts` is the one function that pages through the route's
-`types` filter) only once a task is running
+story (`readEventLog` of the SDK, `packages/sdk/src/event-log.ts`, is the one
+function that pages through the route's `types` filter) only once a task is running
 or open, and then keeps current from the live stream. The newest progress line of a running task is also under the name in
 the Dot header. A task that waits for an answer shows its approval as a card on its own card and in its
 drawer, answerable there (see the Inbox below).
@@ -2345,11 +2344,14 @@ the `origin` of the message), the Dot's as markdown (no raw HTML, links open in 
 referrer, an image is shown as a link to it, a fenced block has a copy button).
 Between them it shows what the Dot did to answer, read from the same event
 log: each `tool.called` that names no task as one quiet line (the words of
-`lib/events/tool-labels.ts`, which a test keeps equal to the engine's tool
-table, then the call's `target`, and how it ended when that was not well; more
+`TOOL_LABELS` in `packages/shared/src/labels.ts`, which a test keeps equal
+to the engine's tool table, then the call's `target`, and how it ended when that was not well; more
 than three in a row fold into one line that opens), and each `approval.requested` that names no task, where it
 was asked, as the approval card while it waits (answerable there) and as a receipt
-line once answered ("Allowed for good" when the answer was "always"). The messages route and the log are two
+line once answered ("Allowed for good" when the answer was "always", with the
+person's note). A call and an approval are read into a step one way for the
+chat, a task's story and the Activity page, with one set of words for how a
+call ended and one format for how long it took (`lib/steps.ts`). The messages route and the log are two
 views of one log, so a step is placed between two messages by event id
 (`lib/chat-thread.ts`). A message shows as soon as it is sent and is replaced by
 the logged one, which `POST .../messages` names by its `event_id`; one that was
@@ -2376,8 +2378,8 @@ the shell reads each Dot's task list (the newest 200, where a recent failure is)
 and keeps the failed ones, and says when some Dot's list could not be read.
 `lib/attention.ts` counts the three, and the rail's Inbox badge, the tab title and
 the favicon all read that one count. The approval card (S7) says what the Dot
-wants to do from the engine's tool table (`lib/events/tool-labels.ts`), the
-permission and its risk (`PERMISSION_INFO`), the Dot's reason, and the call's
+wants to do from the engine's tool table (`TOOL_LABELS`), the
+permission and its risk (`PERMISSION_INFO`, `permissionPhrase`), the Dot's reason, and the call's
 arguments in the form that reads best: a command, a diff for `write_file`,
 `edit_file` and `apply_patch`, an address, a schedule, with the raw arguments
 under Details (a proxy's password is never shown). It is destructive for a
@@ -2388,10 +2390,12 @@ it covers (`GET /api/dots/<id>/tools`, when the computer answers), and then
 `POST /api/approvals/<id>/approve` with `always: true`, which changes the Dot's
 config (section 9.6). The host answers 409 `already_resolved` to the second
 answer; the card says the approval was answered somewhere else. An answered card
-stays in place as a receipt until the person leaves the page. Keys: `j` and `k`
-move between the cards, `a` allows the selected one once and `d` denies it; a
-destructive card is not allowed by a key, `a` moves the focus to its Allow once
-button, whose press is the confirmation. History lists every approval that is no
+stays in place as a receipt until the person leaves the page. Keys, while the
+focus is in the list of the cards (WCAG 2.1.4: a single key is never the whole
+page's): `j` and `k` move between the cards, `a` allows the selected one once and
+`d` denies it, and a card the focus enters is the one selected; a destructive
+card is not allowed by a key, `a` moves the focus to its Allow once button,
+whose press is the confirmation. History lists every approval that is no
 longer waiting, the last answered first: it asks `GET /api/approvals` for the
 answered statuses with `order=desc` and `limit=50`, and "Show older answers" asks
 for the next page with `before` the last id it holds, so the newest answer is
@@ -2523,8 +2527,10 @@ and never given credentials; the others with `add`. The hub owns every policy:
   that fails is retried with backoff (a channel's `retry_after` is honoured); one
   the channel refuses for good (the person blocked the bot) is dropped.
 - **Approvals.** When the Dot asks (`approval.requested`) and the binding's
-  `approvals` setting is on, every owner's chat gets a prompt: the tool, its
-  permission, the reason and the arguments, each cut to 300 characters (the
+  `approvals` setting is on, every owner's chat gets a prompt: what the Dot wants
+  to do and the permission with its risk, in the words the web client's approval
+  card uses (`packages/shared/src/labels.ts`), the reason and the
+  arguments, each cut to 300 characters (the
   arguments can hold private data, and a chat is read by a third party; with
   `show_arguments` off the prompt leaves them out), with an
   Approve and a Reject button. Only a paired owner, in their private chat, can
@@ -2956,9 +2962,9 @@ command is also how a run that stopped is continued. In order:
 
 A step that fails ends the run with exit code 1 and the reason, and nothing
 after it is run; the message ends with the command to run again. At the end it
-prints how to start the server, the address of the web client
-(`INVISIBLE_DOTS_WEB_LISTEN` or its default) and the file whose first line is
-the token to sign in with (created when the server first starts). It does not
+prints how to start the server and the address of the web client
+(`INVISIBLE_DOTS_WEB_LISTEN` or its default), which has no login: the web
+server adds the API token itself (section 9.7). It does not
 start the server itself: `server` runs in the foreground until Ctrl+C. Ctrl+C
 asks `image build` to stop (it kills its builder VM) and ends the run between
 steps; a second Ctrl+C exits at once.

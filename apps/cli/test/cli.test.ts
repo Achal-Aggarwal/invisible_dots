@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDotConfig } from "@invisible-dots/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import cliPackage from "../package.json" with { type: "json" };
 import { commandOf, EXIT, interruptIsAsked, run, SAMPLE_DOT, type CliIo, type HostCommands } from "../src/index.js";
 
 const TOKEN = "cli-test-token-0123456789";
@@ -71,7 +72,7 @@ const channel = {
   peers: [{ peer_id: "10", role: "owner", label: "Ann (@ann)", created_at: now }],
   created_at: now,
 };
-const events = Array.from({ length: 5 }, (_, i) => ({
+let events = Array.from({ length: 5 }, (_, i) => ({
   id: i + 1,
   dot_id: dot.id,
   type: i % 2 ? "agent.state" : "automation.next_run",
@@ -92,6 +93,10 @@ let noAutomationDue = false;
 let whatsappLinked = false;
 let whatsappOff = false;
 let linkFrames: { state: string; [key: string]: unknown }[] = [];
+/** The config_version the fake server holds: an update that expects another one is the 409 of a concurrent change. */
+let configVersion = 1;
+/** Another client saves the Dot's config between a read and the PATCH that follows it. */
+let savedMeanwhile = false;
 
 function send(res: ServerResponse, status: number, body?: unknown) {
   res.writeHead(status, { "content-type": "application/json" });
@@ -123,7 +128,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     case "GET /api/dots":
       return send(res, 200, { dots: [dot] });
     case `GET /api/dots/${dot.id}`:
-      return send(res, 200, dot);
+      return send(res, 200, { ...dot, config_version: configVersion });
+    case `PATCH /api/dots/${dot.id}`:
+      if (savedMeanwhile) configVersion++;
+      if (body?.expected_config_version !== configVersion) return send(res, 409, { error: "dot_changed", message: "the Dot's config changed since it was read" });
+      return send(res, 200, { ...dot, config_version: configVersion + 1 });
+    case `DELETE /api/dots/${dot.id}`:
+      return send(res, 202, { accepted: true });
+    case "POST /api/tasks/task_02/cancel":
+      return send(res, 200, { ...task, id: "task_02", status: "CANCELLED" });
+    case "POST /api/tasks/task_01/cancel":
+      return send(res, 409, { error: "task_finished", message: "task task_01 is already COMPLETED" });
     case `GET /api/dots/${dot.id}/computer`:
       return send(res, 200, { ...(stoppedByPerson ? { ...computer, state: "STOPPED", stop_reason: "user", ready: false } : computer), ...(noAutomationDue ? { next_automation_at: null } : {}) });
     case `GET /api/dots/${dot.id}/tasks`:
@@ -196,8 +211,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     case `DELETE /api/dots/${dot.id}/channels/whatsapp`:
       return send(res, 204);
     case `GET /api/dots/${dot.id}/events`: {
+      // The route's paging: after and before bound the ids, order=desc gives the newest first, limit keeps that many.
       const after = Number(url.searchParams.get("after") ?? 0);
-      return send(res, 200, { events: events.filter((e) => e.id > after) });
+      const before = Number(url.searchParams.get("before") ?? Infinity);
+      const kept = events.filter((e) => e.id > after && e.id < before);
+      const ordered = url.searchParams.get("order") === "desc" ? [...kept].reverse() : kept;
+      return send(res, 200, { events: ordered.slice(0, Number(url.searchParams.get("limit") ?? 1000)) });
     }
     case "GET /api/stream": {
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -235,6 +254,8 @@ beforeEach(() => {
   whatsappLinked = false;
   whatsappOff = false;
   linkFrames = [];
+  configVersion = 1;
+  savedMeanwhile = false;
 });
 
 async function cli(
@@ -267,7 +288,7 @@ describe("usage", () => {
     expect((await cli(["launch"])).stderr).toMatch(/unknown command "launch"/);
     expect((await cli(["list", "--bogus"])).code).toBe(EXIT.usage);
     expect((await cli(["status"])).stderr).toMatch(/missing <dot>/);
-    expect((await cli(["--version"])).stdout).toMatch(/^\d+\.\d+\.\d+\n$/);
+    expect((await cli(["--version"])).stdout).toBe(`${cliPackage.version}\n`);
   });
 });
 
@@ -335,6 +356,8 @@ describe("commands", () => {
     expect(status.stdout).toMatch(/computer\s+RUNNING, ready/);
     expect(status.stdout).toMatch(/next automation\s+2030-01-01T09:00:00.000Z/);
     expect(status.stdout).toContain("task_01");
+    // It shows the newest ten tasks, and asks for ten.
+    expect(requests.find((r) => r.path === "/api/dots/fare-watch/tasks")?.query.get("limit")).toBe("10");
     expect((await cli(["tasks", "fare-watch"])).stdout).toContain("COMPLETED");
   });
 
@@ -388,10 +411,20 @@ describe("commands", () => {
   });
 
   it("approvals, approve and reject", async () => {
-    expect((await cli(["approvals"])).stdout).toContain("apr_1");
-    expect(requests.at(-1)?.query.get("status")).toBe("pending");
+    const pending = await cli(["approvals"]);
+    expect(pending.stdout).toContain("apr_1");
+    const listed = requests.find((r) => r.path === "/api/approvals");
+    expect(listed?.query.get("status")).toBe("pending");
+    expect(listed?.query.get("order")).toBeNull();
+    // The Dot by its name, and the question and the permission in the web client's words.
+    expect(pending.stdout.split("\n")[0]).toMatch(/^ID\s+STATUS\s+DOT\s+WANTS TO\s+PERMISSION\s+REASON$/);
+    expect(pending.stdout).toMatch(/apr_1\s+pending\s+fare-watch\s+delete a browser identity\s+Delete browser identities \(high risk\)\s+cleanup/);
+    requests.length = 0;
     await cli(["approvals", "--all"]);
-    expect(requests.at(-1)?.query.get("status")).toBeNull();
+    const all = requests.find((r) => r.path === "/api/approvals");
+    expect(all?.query.get("status")).toBeNull();
+    // The newest first, so the cap of the list drops the oldest and never the newest.
+    expect(all?.query.get("order")).toBe("desc");
     const approved = await cli(["approve", "apr_1", "--note", "fine"]);
     expect(approved.stdout).toBe("approval apr_1 approved\n");
     expect(requests.at(-1)?.body).toEqual({ note: "fine" });
@@ -591,6 +624,9 @@ describe("commands", () => {
     const lines = tail.stdout.trim().split("\n");
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/#4 agent\.state \{"state":"IDLE"\}$/);
+    // The log is read from its end, the newest two in one request, not paged from its start.
+    const reads = requests.filter((r) => r.path === `/api/dots/${dot.id}/events`);
+    expect(reads.map((r) => [r.query.get("order"), r.query.get("limit"), r.query.get("after")])).toEqual([["desc", "2", null]]);
 
     const controller = new AbortController();
     let output = "";
@@ -613,6 +649,76 @@ describe("commands", () => {
     const stream = requests.find((r) => r.path === "/api/stream");
     expect(stream?.query.get("after")).toBe("5");
     expect(stream?.query.get("dot_id")).toBe(dot.id);
+  });
+
+  it("logs --tail 0 prints nothing old and follows from the newest event, which it reads alone", async () => {
+    const quiet = await cli(["logs", "fare-watch", "--tail", "0", "--no-follow"]);
+    expect(quiet.code).toBe(EXIT.ok);
+    expect(quiet.stdout).toBe("");
+    expect(requests.filter((r) => r.path === `/api/dots/${dot.id}/events`).map((r) => r.query.get("limit"))).toEqual(["1"]);
+  });
+
+  it("logs --tail beyond a page reads the newest pages from the end, older one by one, and stops at the start of the log", async () => {
+    const saved = events;
+    events = Array.from({ length: 2500 }, (_, i) => ({ ...saved[0]!, id: i + 1 }));
+    try {
+      const tail = await cli(["logs", "fare-watch", "--tail", "2200", "--no-follow"]);
+      const lines = tail.stdout.trim().split("\n");
+      expect(lines).toHaveLength(2200);
+      expect(lines[0]).toContain("#301 ");
+      expect(lines.at(-1)).toContain("#2500 ");
+      const reads = requests.filter((r) => r.path === `/api/dots/${dot.id}/events`);
+      expect(reads.map((r) => [r.query.get("limit"), r.query.get("before")])).toEqual([
+        ["1000", null],
+        ["1000", "1501"],
+        ["200", "501"],
+      ]);
+      requests.length = 0;
+      expect((await cli(["logs", "fare-watch", "--tail", "9000", "--no-follow"])).stdout.trim().split("\n")).toHaveLength(2500);
+      expect(requests.filter((r) => r.path === `/api/dots/${dot.id}/events`)).toHaveLength(3);
+    } finally {
+      events = saved;
+    }
+  });
+
+  it("cancel cancels a task, and shows the server's 409 for one that has finished", async () => {
+    const cancelled = await cli(["cancel", "task_02"]);
+    expect(cancelled.code).toBe(EXIT.ok);
+    expect(cancelled.stdout).toBe("task task_02 CANCELLED\n");
+    expect(requests.at(-1)).toMatchObject({ method: "POST", path: "/api/tasks/task_02/cancel" });
+    const finished = await cli(["cancel", "task_01"]);
+    expect(finished.code).toBe(EXIT.failed);
+    expect(finished.stderr).toMatch(/already COMPLETED \[409 task_finished\]/);
+    expect((await cli(["cancel"])).stderr).toMatch(/missing <task-id>/);
+  });
+
+  it("delete refuses without --yes and says what it destroys, and deletes with it", async () => {
+    const refused = await cli(["delete", "fare-watch"]);
+    expect(refused.code).toBe(EXIT.usage);
+    expect(refused.stderr).toContain("cannot be undone");
+    expect(refused.stderr).toContain("invisible-dots delete fare-watch --yes");
+    expect(requests).toHaveLength(0);
+    const deleted = await cli(["delete", "fare-watch", "--yes"]);
+    expect(deleted.code).toBe(EXIT.ok);
+    expect(requests.at(-1)).toMatchObject({ method: "DELETE", path: `/api/dots/${dot.id}` });
+    expect(deleted.stdout).toBe(`deleting Dot fare-watch; what it did stays in its log: invisible-dots logs ${dot.id}\n`);
+  });
+
+  it("update sends the YAML with the config version it read, so a change made meanwhile is a 409 and nothing is saved", async () => {
+    await writeFile(join(configDir, "changed.yaml"), SAMPLE_DOT);
+    configVersion = 4;
+    const updated = await cli(["update", "fare-watch", "changed.yaml"]);
+    expect(updated.code).toBe(EXIT.ok);
+    expect(updated.stdout).toBe("updated Dot fare-watch (config version 5)\n");
+    expect(requests.at(-1)).toMatchObject({ method: "PATCH", path: `/api/dots/${dot.id}`, body: { config: SAMPLE_DOT, expected_config_version: 4 } });
+
+    // The web client saved between this command's read and its write.
+    savedMeanwhile = true;
+    const raced = await cli(["update", "fare-watch", "changed.yaml"]);
+    expect(raced.code).toBe(EXIT.failed);
+    expect(raced.stderr).toMatch(/\[409 dot_changed\]/);
+    expect((await cli(["update", "fare-watch", "missing.yaml"])).code).toBe(EXIT.usage);
+    expect((await cli(["update", "fare-watch"])).stderr).toMatch(/missing <file.yaml>/);
   });
 });
 
@@ -675,6 +781,12 @@ describe("host commands", () => {
     const failed = await cli(["server"], { host });
     expect(failed.code).toBe(EXIT.failed);
     expect(failed.stderr).toBe("invisible-dots: another invisible-dots server (pid 42) is already running\n");
+  });
+
+  it("lists both channels where a command takes either", async () => {
+    const help = (await cli(["--help"])).stdout;
+    expect(help).toContain("invisible-dots channel pair telegram|whatsapp --dot <dot>");
+    expect(help).toContain("invisible-dots channel remove telegram|whatsapp --dot <dot>");
   });
 
   it("lists setup --all in the help, first among the host commands", async () => {

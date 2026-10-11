@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { approvalBody, askTitle, boundedJson, isDestructive, permissionInfo, RECEIPT_WORD, RISK_LABEL, type ApprovalAsk } from "../../lib/approval-view";
-import { toolLabel } from "../../lib/events/tool-labels";
+import { approvalBody, askTitle, boundedJson, isDestructive, permissionInfo, RECEIPT_WORD, type ApprovalAsk } from "../../lib/approval-view";
 import { formatDate } from "../../lib/format";
 import { relativeTime } from "../../lib/time";
 import { cn } from "../../lib/utils";
@@ -11,7 +10,7 @@ import { ErrorAlert } from "../ErrorAlert";
 import { ApprovalCard as ApprovalCardElement } from "../elements/approval-card";
 import { DotAvatar } from "../shell/DotAvatar";
 import { FAMILY_ICON } from "../tool-family-icon";
-import { APPROVAL_NOTE_MAX } from "@invisible-dots/shared/browser";
+import { APPROVAL_NOTE_MAX, permissionPhrase, toolLabel } from "@invisible-dots/shared/browser";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -80,7 +79,7 @@ export function ApprovalCard({ ask, answers, dotName, selected = false, classNam
           {" · "}
         </>
       ) : null}
-      <span>{info ? `${info.label} (${RISK_LABEL[info.risk].toLowerCase()})` : ask.permission}</span>
+      <span>{permissionPhrase(ask.permission)}</span>
       {" · "}
       <Link href={where.href} className="underline underline-offset-2 hover:text-foreground">
         {where.words}

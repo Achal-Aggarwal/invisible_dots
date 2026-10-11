@@ -1,7 +1,7 @@
 "use client";
 
 import { BrainIcon, CircleDotIcon, FlagIcon, GlobeIcon, HandIcon, MessageSquareIcon, MonitorIcon, SendIcon, SparklesIcon, type LucideIcon } from "lucide-react";
-import { toolLabel } from "../../lib/events/tool-labels";
+import { toolLabel } from "@invisible-dots/shared/browser";
 import type { EventFamily, EventView } from "../../lib/events/view";
 import { formatDate } from "../../lib/format";
 import type { StoredEvent } from "../../lib/types";

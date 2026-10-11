@@ -127,6 +127,30 @@ describe("the e2e run's contract with the product", () => {
     for (const flag of CLI_FLAGS) expect(USAGE, flag).toContain(flag);
   });
 
+  it("names in run.ts only commands and flags it declares", () => {
+    const run = read("tests/e2e/run.ts");
+    // Each call of the CLI (`cli([...])`, `cliJson<T>([...])`): its leading words are the command, its quoted `--` words the flags.
+    const calls = [...run.matchAll(/\bcli(?:Json<[^>]*>)?\(\[([^\]]*)\]/g)].map((m) => m[1]!);
+    expect(calls.length).toBeGreaterThan(10);
+    for (const call of calls) {
+      const words = call.split(",").map((part) => part.trim());
+      const head: string[] = [];
+      for (const word of words) {
+        const literal = /^"([a-z-]+)"$/.exec(word)?.[1];
+        if (literal === undefined || literal.startsWith("--")) break;
+        head.push(literal);
+      }
+      const command = head.join(" ");
+      if (command !== "") {
+        expect(
+          CLI_COMMANDS.some((declared) => command === declared || command.startsWith(`${declared} `)),
+          `run.ts runs "invisible-dots ${command}", which CLI_COMMANDS does not declare`,
+        ).toBe(true);
+      }
+      for (const flag of call.matchAll(/"(--[a-z-]+)"/g)) expect(CLI_FLAGS as readonly string[], `run.ts passes ${flag[1]}`).toContain(flag[1]!);
+    }
+  });
+
   it("asserts only on tools of the engine's permission table, under the permission it names", () => {
     const table = read("invisible_engine_dots/nanobot/dots/permissions.py");
     const rows = new Map([...table.matchAll(/^\s+"(\w+)": ToolEntry\("([a-z.]+)"/gm)].map((m) => [m[1]!, m[2]!]));

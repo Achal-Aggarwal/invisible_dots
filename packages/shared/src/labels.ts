@@ -1,4 +1,12 @@
-// Derived from OpenDots (CopilotKit) src/client/ComputerToolCard.tsx at 88f2a08, MIT; changed: the map is over this engine's tool table (permissions.py) and not the demo's computer actions; each entry says in past tense what the call did, in the infinitive what it would do (for an approval card), and which family of tools it belongs to; a tool the table does not know is named as the model called it.
+// Derived from OpenDots (CopilotKit) src/client/ComputerToolCard.tsx at 88f2a08, MIT; changed: the map is over this engine's tool table (permissions.py) and not the demo's computer actions; each entry says in past tense what the call did, in the infinitive what it would do (for an approval card), and which family of tools it belongs to; a tool the table does not know is named as the model called it; the words for a permission and for a channel account below are this project's own.
+
+/**
+ * The words a person reads for a tool, a permission and a channel's account, the same in every client: the web client's
+ * chat, tasks, approval cards and channel cards, the approval prompt of a Telegram or WhatsApp chat, and the command
+ * line's tables.
+ */
+import type { ChannelKind } from "./events.js";
+import { permissionInfo, type PermissionRisk } from "./tools.js";
 
 /** What kind of thing a tool does: the chat draws one icon per family. */
 export type ToolFamily = "command" | "read" | "write" | "automation" | "screen" | "browser-identity" | "browser" | "other";
@@ -58,4 +66,22 @@ export const TERMINAL_LABEL = "Started a terminal session";
 export function toolLabel(tool: string, tty = false): ToolLabel {
   if (tool === "exec" && tty) return { ...TOOL_LABELS.exec!, label: TERMINAL_LABEL };
   return Object.hasOwn(TOOL_LABELS, tool) ? TOOL_LABELS[tool]! : { label: `Called ${tool}`, ask: `call ${tool}`, family: "other" };
+}
+
+export const RISK_LABEL: Record<PermissionRisk, string> = { low: "Low risk", medium: "Medium risk", high: "High risk" };
+
+/**
+ * A permission as an approval names it, "Run commands (high risk)"; a name with no words (one a Dot's config can no
+ * longer hold) is shown as it is.
+ */
+export function permissionPhrase(permission: string): string {
+  const info = permissionInfo(permission);
+  return info === null ? permission : `${info.label} (${RISK_LABEL[info.risk].toLowerCase()})`;
+}
+
+/** The account of a channel as a person writes it: a bot's `@name`, a phone number with its plus; null until the channel reports one. */
+export function accountLabel(kind: ChannelKind, account: string | null): string | null {
+  if (account === null || account === "") return null;
+  if (kind === "telegram") return `@${account}`;
+  return account.startsWith("+") ? account : `+${account}`;
 }

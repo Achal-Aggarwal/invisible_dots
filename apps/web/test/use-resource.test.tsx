@@ -35,4 +35,19 @@ describe("useResource", () => {
     await act(async () => resolvers[0]!("older"));
     expect(result.current.data).toBe("newer");
   });
+
+  it("returns the same object until one of its fields changes, so what is built from it is not rebuilt for nothing", async () => {
+    let finish: (value: string) => void = () => {};
+    const { result, rerender } = renderHook(() => useResource(() => new Promise<string>((resolve) => (finish = resolve)), "one"));
+    const loading = result.current;
+    rerender();
+    expect(result.current).toBe(loading);
+    await act(async () => finish("loaded"));
+    await waitFor(() => expect(result.current.data).toBe("loaded"));
+    const loaded = result.current;
+    expect(loaded).not.toBe(loading);
+    rerender();
+    rerender();
+    expect(result.current).toBe(loaded);
+  });
 });

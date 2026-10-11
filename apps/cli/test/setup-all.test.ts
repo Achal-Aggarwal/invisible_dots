@@ -5,7 +5,6 @@ import { runSetupAll, SETUP_ALL_COMMAND, webAddress, type SetupAllDeps } from ".
 import type { StepResult } from "../src/setup/build.js";
 import type { HostOutcome } from "../src/setup/setup.js";
 
-const TOKEN_PATH = "/home/someone/.invisible-dots/config/api.token";
 const DONE: StepResult = { ok: true, lines: ["done"] };
 
 /** A run of `setup --all` against fake steps; `calls` is the order they ran in. */
@@ -19,7 +18,6 @@ async function all(overrides: Partial<SetupAllDeps> = {}) {
     web: async () => (calls.push("web"), DONE),
     images: async () => (calls.push("images"), EXIT.ok),
     env: {},
-    tokenPath: TOKEN_PATH,
     ...overrides,
   };
   const code = await runSetupAll(deps);
@@ -34,8 +32,8 @@ describe("setup --all", () => {
     expect(result.text).toMatch(/\[1\/4\] the guest daemon[\s\S]*\[2\/4\] QEMU[\s\S]*\[3\/4\] the web client[\s\S]*\[4\/4\] the guest images/);
     expect(result.text).toContain("built /repo/guest/dot-agentd/bin/dot-agentd");
     expect(result.text).toContain("1. start the server and leave it running:   invisible-dots server");
-    expect(result.text).toContain(`open http://${DEFAULT_WEB_LISTEN} in your browser and sign in with the first line of\n     ${TOKEN_PATH}`);
-    expect(result.text).toContain("the server creates that file the first time it starts");
+    expect(result.text).toContain(`2. open http://${DEFAULT_WEB_LISTEN} in your browser\n`);
+    expect(result.text).not.toMatch(/sign in|api\.token/);
     expect(result.text).toContain("OpenRouter key");
   });
 

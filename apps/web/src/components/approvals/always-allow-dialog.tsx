@@ -1,7 +1,8 @@
 "use client";
 
+import { RISK_LABEL } from "@invisible-dots/shared/browser";
 import { api } from "../../lib/api";
-import { permissionInfo, RISK_LABEL, toolsCovered, type ApprovalAsk } from "../../lib/approval-view";
+import { permissionInfo, toolsCovered, type ApprovalAsk } from "../../lib/approval-view";
 import { useResource } from "../ui";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
