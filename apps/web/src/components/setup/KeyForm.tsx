@@ -7,7 +7,7 @@ import { api } from "../../lib/api";
 import { keySavedMessage } from "../../lib/host-settings";
 import { ErrorAlert } from "../ErrorAlert";
 import { Field } from "../new-dot/Field";
-import { useShell } from "../shell/attention";
+import { useHealth } from "../shell/attention";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { useAction } from "../ui";
@@ -18,7 +18,7 @@ import { useAction } from "../ui";
  * answer, and the answer to saving one says how many running Dots were given it at once.
  */
 export function KeyForm() {
-  const { health } = useShell();
+  const health = useHealth();
   const [value, setValue] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);

@@ -4,7 +4,7 @@ import { WifiOffIcon } from "lucide-react";
 import { offlineOf } from "../../lib/offline";
 import { useStreamStatus } from "../events";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
-import { useShell } from "./attention";
+import { useHealth } from "./attention";
 
 /**
  * Says so, at the top of every page, when the control plane does not answer: the live stream is down or the health
@@ -12,7 +12,7 @@ import { useShell } from "./attention";
  */
 export function OfflineBanner() {
   const stream = useStreamStatus();
-  const { health } = useShell();
+  const health = useHealth();
   const offline = offlineOf({ stream: stream.status, streamDetail: stream.detail, apiError: health.error });
   if (offline === null) return null;
   return (

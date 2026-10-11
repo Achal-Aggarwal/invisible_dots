@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventStreamProvider } from "../src/components/events";
 import { HostSettings } from "../src/components/settings/HostSettings";
-import { AttentionProvider, useShell } from "../src/components/shell/attention";
+import { AttentionProvider, useHealth } from "../src/components/shell/attention";
 import { THEME_KEY } from "../src/lib/theme";
 import { stubMatchMedia } from "./support/browser";
 import { FakeControlPlane } from "./support/control-plane";
@@ -29,7 +29,7 @@ afterEach(() => {
 
 /** What the shell's rail reads from the same health answer, to see that the page and the rail agree. */
 function RailKey() {
-  const { health } = useShell();
+  const health = useHealth();
   return <p data-testid="rail-key">{health.data ? String(health.data.openrouter_configured) : "unknown"}</p>;
 }
 

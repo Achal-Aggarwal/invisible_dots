@@ -6,7 +6,7 @@ import type { ThemePreference } from "../../lib/theme";
 import { useThemePreference } from "../../lib/use-theme";
 import { cn } from "../../lib/utils";
 import { ErrorAlert } from "../ErrorAlert";
-import { useShell } from "../shell/attention";
+import { useHealth } from "../shell/attention";
 import { CheckAgainButton, CheckList, CheckListSkeleton } from "../setup/CheckList";
 import { KeyForm } from "../setup/KeyForm";
 import { Section } from "../setup/Section";
@@ -84,7 +84,7 @@ function Appearance() {
 }
 
 function About() {
-  const { health } = useShell();
+  const health = useHealth();
   return (
     <Section id="about" title="About" busy={health.loading && health.data === undefined}>
       {health.error !== null && health.data === undefined ? <ErrorAlert error={health.error} title="The control plane does not answer" /> : null}

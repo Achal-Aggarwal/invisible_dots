@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { isReady, notReadyCount } from "../../lib/preflight";
-import { useShell } from "../shell/attention";
+import { useHealth } from "../shell/attention";
 import { CheckAgainButton, CheckList } from "./CheckList";
 import { KeyForm } from "./KeyForm";
 import { Section } from "./Section";
@@ -16,7 +16,7 @@ import { useHostChecks } from "./use-host-checks";
  */
 export function SetupChecklist() {
   const checks = useHostChecks();
-  const { health } = useShell();
+  const health = useHealth();
   const [needed, setNeeded] = useState<{ key: boolean } | null>(null);
   const items = checks.items;
   const ready = items !== null && isReady(items);
