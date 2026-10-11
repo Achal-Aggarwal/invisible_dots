@@ -152,6 +152,15 @@ def browser_identity_only_target(params: Mapping[str, Any]) -> str | None:
     return _on_identity(params, None)
 
 
+def add_mcp_server_target(params: Mapping[str, Any]) -> str | None:
+    """The server's name and what it runs or reaches: `time: uvx mcp-server-time`, `search: https://host/mcp`."""
+    name = _string(params, "name")
+    args = params.get("args")
+    words = [_string(params, "command"), *(arg for arg in args if isinstance(arg, str))] if isinstance(args, list) else [_string(params, "command")]
+    what = " ".join(word for word in words if word) or without_userinfo(_string(params, "url"))
+    return f"{name}: {what}" if name and what else name or None
+
+
 def all_arguments(params: Mapping[str, Any]) -> dict[str, Any]:
     """The arguments of a call that carries nothing to hide: as they are."""
     return dict(params)

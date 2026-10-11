@@ -82,6 +82,9 @@ async def _engine_events(make_engine: MakeEngine) -> list[dict[str, Any]]:
         # A chat turn and a task whose call asks for approval.
         calls(call("c5", "exec", command="ls -la")),
         calls(call("c6", "exec", command="ls -la")),
+        # A chat turn that adds an MCP server, which the config allows.
+        calls(call("c7", "add_mcp_server", name="clock", command="uvx", args=["mcp-server-time"], reason="to tell the time")),
+        says("Asked to add it."),
         # The memory pass over the conversations above.
         says("## The person\n- looks for the cheapest fares (2026-10-04)", cost=0.0625),
     ]
@@ -110,6 +113,10 @@ async def _engine_events(make_engine: MakeEngine) -> list[dict[str, Any]]:
     await h.browser.launch(identity.id)
     await h.browser.close(identity.id)
     await h.browser.delete(identity.id)
+
+    h.configure(runtime_config_body(permissions={**ALLOW_ALL, "mcp.servers.add": "allow"}))
+    h.engine.accept(user_message("m3", "add a clock"))
+    await h.idle()
 
     h.engine.automations_next_run(1_790_000_000_000)
     h.engine.automations_next_run(None)
@@ -189,7 +196,8 @@ async def mcp_answer(make_engine: MakeEngine, tmp_path: Path) -> dict[str, Any]:
     )
     await h.mcp_servers.ready()
     try:
-        rows = [row for row in h.engine.tool_table() if row["permission"].startswith("mcp.")]
+        # The servers' tools: add_mcp_server's own permission is mcp.servers.add, a row of the table.
+        rows = [row for row in h.engine.tool_table() if row["name"].startswith("mcp_")]
         return {"tools": rows, "mcp_servers": h.engine.mcp_status()}
     finally:
         await h.mcp_servers.aclose()
