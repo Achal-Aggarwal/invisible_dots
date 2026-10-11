@@ -114,18 +114,15 @@ describe("Needs you", () => {
     await screen.findByText("Nothing needs you");
   });
 
-  it("says that some failed tasks may be missing when a Dot's tasks could not be read", async () => {
+  it("says that failed tasks may be missing when they could not be read", async () => {
     const real = plane.fetch;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input) === "/api/dots/d2/tasks" ? Response.json({ error: "down", message: "down" }, { status: 502 }) : real(input, init))),
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).startsWith("/api/tasks?") ? Response.json({ error: "down", message: "down" }, { status: 502 }) : real(input, init))),
     );
-    plane.tasks = [taskRecord("t1", { dot_id: "d1", description: "Send the digest", status: "FAILED", error: "no", finished_at: hoursAgo(2) })];
     await renderInbox();
-    expect(await screen.findByText("Some failed tasks may be missing")).toBeTruthy();
-    expect(screen.getByText("The tasks of one Dot could not be read.")).toBeTruthy();
-    // What could be read is still there.
-    expect(screen.getByRole("article", { name: "Failed: Send the digest" })).toBeTruthy();
+    expect(await screen.findByText("Failed tasks may be missing")).toBeTruthy();
+    expect(screen.getByText("The tasks that failed today could not be read.")).toBeTruthy();
   });
 
   it("adds the channels that need linking again, with what the host says and the page where it is done", async () => {
@@ -156,17 +153,11 @@ describe("Needs you", () => {
     expect(screen.queryByRole("article", { name: /needs linking again/ })).toBeNull();
   });
 
-  it("says that some channels may be missing when a Dot's channels could not be read", async () => {
-    const real = plane.fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input) === "/api/dots/d2/channels" ? Response.json({ error: "down", message: "down" }, { status: 502 }) : real(input, init))),
-    );
-    plane.channels = { d1: [channelRecord("telegram", { status: "needs_relink" })] };
+  it("says that channels may be missing when they could not be read", async () => {
+    plane.failChannels = { status: 502, error: "down", message: "down" };
     await renderInbox();
-    expect(await screen.findByText("Some channels may be missing")).toBeTruthy();
-    expect(screen.getByText("The channels of one Dot could not be read.")).toBeTruthy();
-    expect(screen.getByRole("article", { name: "Telegram of fares needs linking again" })).toBeTruthy();
+    expect(await screen.findByText("Channels may be missing")).toBeTruthy();
+    expect(screen.getByText("The channels could not be read.")).toBeTruthy();
   });
 
   it("says that nothing needs the person when nothing does, and loads without flashing that before it knows", async () => {

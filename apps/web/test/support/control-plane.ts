@@ -361,6 +361,18 @@ export class FakeControlPlane {
       this.push(record.dot_id, "approval.resolved", { approval_id: id, decision, ...(record.task_id ? { task_id: record.task_id } : {}), ...(body.note ? { note: body.note } : {}), ...(body.always ? { always: true } : {}) });
       return json(record);
     }
+    if (pathname === "/api/tasks" && method === "GET") {
+      // The real route: the tasks of every Dot that ended in `status` after `finished_after`, the latest end first.
+      const status = searchParams.get("status");
+      const after = Date.parse(searchParams.get("finished_after") ?? "");
+      const ended = this.tasks.filter((t) => t.status === status && t.finished_at !== null && Date.parse(t.finished_at) > after);
+      return json({ tasks: ended.sort((a, b) => Date.parse(b.finished_at!) - Date.parse(a.finished_at!)) });
+    }
+    if (pathname === "/api/channels" && method === "GET") {
+      // The real route: every channel of every Dot, each with its Dot's id.
+      if (this.failChannels) return json({ error: this.failChannels.error, message: this.failChannels.message }, this.failChannels.status);
+      return json({ channels: Object.entries(this.channels).flatMap(([dotId, list]) => list.map((channel) => ({ dot_id: dotId, ...channel }))) });
+    }
     const task = /^\/api\/tasks\/([^/]+)(\/cancel)?$/.exec(pathname);
     if (task) {
       const record = this.tasks.find((t) => t.id === decodeURIComponent(task[1]!));
