@@ -124,7 +124,7 @@ PAGE_CALLS: list[tuple[str, dict[str, Any]]] = [
     ("browser_snapshot", {}),
     ("browser_read_text", {}),
     ("browser_read_text", {"selector": ":nth-match(li.item, 2)"}),
-    ("browser_read_text", {"selector": "h1", "max_chars": 50}),
+    ("browser_read_text", {"selector": "h1"}),
     ("browser_read_html", {"mode": "text"}),
     ("browser_take_screenshot", {}),
     ("browser_evaluate", {"expression": "document.title"}),
