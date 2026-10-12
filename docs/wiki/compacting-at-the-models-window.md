@@ -27,7 +27,8 @@ model with a one-million-token window was being summarized at 32,000.
 So the limits went, all of them: a Dot has no token setting. Every request uses
 its model's own limits, read from OpenRouter at the start of every turn (the
 widest window of the providers serving the model, and the longest answer at
-that window), and
+that window; its requests go only to those providers, so none lands on a
+narrower one), and
 asks for the longest answer the window leaves room for. Without `max_tokens`
 each provider would apply a default of its own, often far lower. A response
 cut before it delivered anything is now told that nothing ran and to work in

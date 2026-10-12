@@ -1425,9 +1425,15 @@ Every request uses the whole of what its model can do. The engine reads the
 model's limits at the start of every turn from the providers OpenRouter lists
 for it (`GET /models/{model}/endpoints`), not once: an engine runs for weeks and
 OpenRouter changes a model's providers meanwhile. Of the providers serving it,
-the widest window and the longest answer at that window are the model's. A
-model OpenRouter does not know fails the turn in words; a router, which lists
-no provider, gets no limits. Each request
+the widest window and the longest answer at that window are the model's, and
+the model's requests go only to the providers of that window (`provider.only`,
+by the slug OpenRouter lists for each): OpenRouter routes a request by the
+answer it asks for but not by the prompt it carries, so one sized for the
+widest window could otherwise land on a narrower provider and fail there. This
+gives up the narrower providers as fallbacks; when none of the widest can
+serve, OpenRouter refuses the request ("No allowed providers are available")
+and the turn fails with those words. A model OpenRouter does not know fails the
+turn in words; a router, which lists no provider, gets no limits and no route. Each request
 sends the longest answer as `max_tokens`, or what the window leaves after the
 prompt when that is less (OpenRouter refuses more, and without a `max_tokens`
 each provider applies a default of its own), so no answer is cut shorter than

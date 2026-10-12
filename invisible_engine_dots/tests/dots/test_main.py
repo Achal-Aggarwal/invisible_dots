@@ -284,7 +284,7 @@ class FakeOpenRouter:
         model = request.match_info["model"]
         if model != "z-ai/glm-5.3-flash":
             return web.json_response({"error": {"message": "Not Found", "code": 404}}, status=404)
-        provider = {"provider_name": "stand-in", "context_length": 400_000, "max_completion_tokens": 128_000, "status": 0}
+        provider = {"provider_name": "stand-in", "tag": "stand-in", "context_length": 400_000, "max_completion_tokens": 128_000, "status": 0}
         return web.json_response({"data": {"id": model, "endpoints": [provider]}})
 
     async def start(self) -> None:

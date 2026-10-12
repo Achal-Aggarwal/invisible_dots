@@ -1,4 +1,5 @@
-"""The OpenAI-compatible provider reads a model's limits from the providers OpenRouter lists for it, on every call."""
+"""The OpenAI-compatible provider reads a model's limits from the providers OpenRouter lists for it, on every call,
+and sends the model's requests only to the providers of its widest window."""
 
 from __future__ import annotations
 
@@ -13,21 +14,21 @@ from nanobot.providers.base import ModelLimits
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 
-def endpoint(provider: str, context: int | None, answer: int | None, status: int = 0) -> dict[str, Any]:
-    return {"provider_name": provider, "context_length": context, "max_completion_tokens": answer, "status": status}
+def endpoint(tag: str, context: int | None, answer: int | None, status: int = 0) -> dict[str, Any]:
+    return {"tag": tag, "context_length": context, "max_completion_tokens": answer, "status": status}
 
 
 # As OpenRouter answered GET /models/z-ai/glm-5.3-flash/endpoints on 2026-10-12, a few of its 32 providers.
 ENDPOINTS: dict[str, list[dict[str, Any]]] = {
     "z-ai/glm-5.3-flash": [
-        endpoint("Reka", 262_144, 235_929),
-        endpoint("Z.AI", 1_048_576, 131_072),
-        endpoint("Fireworks", 1_048_576, 943_718),
-        endpoint("Together", 1_048_575, 943_717),
+        endpoint("reka", 262_144, 235_929),
+        endpoint("z-ai/fp8", 1_048_576, 131_072),
+        endpoint("fireworks/us", 1_048_576, 943_718),
+        endpoint("together", 1_048_575, 943_717),
         # A provider that is down does not count, however wide its window.
-        endpoint("SiliconFlow", 2_000_000, 262_144, status=-5),
+        endpoint("siliconflow/fp8", 2_000_000, 262_144, status=-5),
     ],
-    "apodex/apodex-1.1-mini:free": [endpoint("Novita", 262_144, 235_929)],
+    "apodex/apodex-1.1-mini:free": [endpoint("novita", 262_144, 235_929)],
     # A router chooses the model per request: OpenRouter lists no provider for it.
     "openrouter/auto": [],
 }
@@ -63,6 +64,11 @@ async def served() -> AsyncIterator[tuple[OpenAICompatProvider, Models]]:
         await runner.cleanup()
 
 
+def _sent(provider: OpenAICompatProvider, model: str) -> dict[str, Any]:
+    """What a request for `model` would carry."""
+    return provider._build_kwargs([{"role": "user", "content": "hi"}], None, model, 100, 0.7, None)
+
+
 async def test_a_model_has_the_widest_window_of_the_providers_serving_it_and_the_longest_answer_at_that_window(
     served,
 ) -> None:
@@ -74,22 +80,36 @@ async def test_a_model_has_the_widest_window_of_the_providers_serving_it_and_the
     )
 
 
-async def test_the_limits_are_read_again_on_every_call_so_a_change_at_openrouter_is_seen(served) -> None:
+async def test_a_models_requests_go_only_to_the_providers_of_its_widest_window(served) -> None:
+    provider, _ = served
+
+    await provider.model_limits("z-ai/glm-5.3-flash")
+
+    # Not Reka (262144) nor Together (one token short), nor the wider SiliconFlow that is down.
+    assert _sent(provider, "z-ai/glm-5.3-flash")["extra_body"] == {"provider": {"only": ["fireworks/us", "z-ai/fp8"]}}
+
+
+async def test_the_limits_and_the_routes_are_read_again_on_every_call_so_a_change_at_openrouter_is_seen(
+    served,
+) -> None:
     provider, models = served
 
     assert (await provider.model_limits("apodex/apodex-1.1-mini:free")).context_tokens == 262_144
-    ENDPOINTS["apodex/apodex-1.1-mini:free"].append(endpoint("Fireworks", 524_288, 131_072))
+    assert _sent(provider, "apodex/apodex-1.1-mini:free")["extra_body"] == {"provider": {"only": ["novita"]}}
+    ENDPOINTS["apodex/apodex-1.1-mini:free"].append(endpoint("fireworks", 524_288, 131_072))
     try:
         assert (await provider.model_limits("apodex/apodex-1.1-mini:free")).context_tokens == 524_288
     finally:
         ENDPOINTS["apodex/apodex-1.1-mini:free"].pop()
+    assert _sent(provider, "apodex/apodex-1.1-mini:free")["extra_body"] == {"provider": {"only": ["fireworks"]}}
     assert models.reads == 2
 
 
-async def test_a_router_has_unknown_limits(served) -> None:
+async def test_a_router_has_unknown_limits_and_its_requests_go_anywhere(served) -> None:
     provider, _ = served
 
     assert await provider.model_limits("openrouter/auto") == ModelLimits()
+    assert "extra_body" not in _sent(provider, "openrouter/auto")
 
 
 async def test_a_model_openrouter_does_not_know_is_an_error(served) -> None:

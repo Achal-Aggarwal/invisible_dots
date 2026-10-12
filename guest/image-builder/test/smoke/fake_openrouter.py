@@ -202,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(404, {"error": {"message": "Not Found", "code": 404}})
                 return
             window, answer = limits[model_id]
-            provider = {"provider_name": "stand-in", "context_length": window, "max_completion_tokens": answer, "status": 0}
+            provider = {"provider_name": "stand-in", "tag": "stand-in", "context_length": window, "max_completion_tokens": answer, "status": 0}
             self._send_json(200, {"data": {"id": model_id, "endpoints": [provider]}})
             return
         if "/chat/completions" not in self.path:
