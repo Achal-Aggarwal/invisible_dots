@@ -18,7 +18,6 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 class _DelayTool(Tool):
@@ -93,7 +92,6 @@ async def _run_optional_tool_response(response: LLMResponse):
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
     return result, shared_events
 
@@ -199,7 +197,6 @@ async def test_runner_rejects_near_miss_tool_name_without_executing():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "done"
@@ -276,7 +273,6 @@ async def test_runner_preserves_structured_success_that_starts_with_error():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.stop_reason == "completed"

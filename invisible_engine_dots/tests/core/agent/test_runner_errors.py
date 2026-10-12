@@ -14,7 +14,6 @@ from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.execution import execute_tool_calls
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 @pytest.mark.asyncio
@@ -38,7 +37,6 @@ async def test_runner_returns_tool_exception_to_model_for_recovery():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert provider.chat_stream_with_retry.await_count == 2
@@ -111,7 +109,6 @@ async def test_llm_error_not_appended_to_session_messages():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.stop_reason == "error"
@@ -140,7 +137,6 @@ async def test_llm_arrearage_error_surfaces_clear_message():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.stop_reason == "error"
@@ -169,7 +165,6 @@ async def test_a_refusal_for_credit_says_what_the_provider_said_after_the_explan
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == f"{_ARREARAGE_ERROR_MESSAGE} The provider said: {said}"
@@ -191,7 +186,6 @@ async def test_a_refusal_for_credit_with_no_text_says_the_explanation_alone():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == _ARREARAGE_ERROR_MESSAGE
@@ -227,7 +221,6 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     tools.execute.assert_not_awaited()
@@ -259,7 +252,6 @@ async def test_runner_returns_structured_tool_error_to_model_for_recovery():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert provider.chat_stream_with_retry.await_count == 2
@@ -297,7 +289,6 @@ async def test_runner_preserves_successful_exec_output_that_starts_with_error():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "done"
@@ -343,7 +334,6 @@ async def test_runner_preserves_tool_error_results_in_messages():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.stop_reason == "max_iterations"
@@ -397,7 +387,6 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     # The runner must have injected a length-recovery prompt and continued,

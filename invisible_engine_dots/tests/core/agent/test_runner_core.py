@@ -17,7 +17,6 @@ from nanobot.providers.base import (
     ToolCallRequest,
 )
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 def _make_usage_spec(provider, tools):
@@ -27,7 +26,6 @@ def _make_usage_spec(provider, tools):
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
 
 
@@ -52,7 +50,6 @@ def test_initial_transcript_is_built_from_structured_turn_input() -> None:
         tools=MagicMock(),
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
 
     messages, compaction = AgentRunner._initial_transcript_and_compaction(spec)
@@ -246,7 +243,6 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "done"
@@ -310,7 +306,6 @@ async def test_runner_preserves_tool_result_before_rejecting_unfit_followup():
             context_window_tokens=2_224,
             max_tokens=1_000,
             max_iterations=3,
-            max_tool_result_chars=10_000,
             checkpoint_callback=checkpoint,
         ))
 
@@ -320,12 +315,14 @@ async def test_runner_preserves_tool_result_before_rejecting_unfit_followup():
         for checkpoint in checkpoints
         if checkpoint["phase"] == "tool_result"
     )
-    assert tool_result == {
+    # The window leaves less than the cut's own note, so none of the file fits: the result says so, and is stored.
+    assert {key: tool_result[key] for key in ("role", "tool_call_id", "name")} == {
         "role": "tool",
         "tool_call_id": "call_1",
         "name": "read_file",
-        "content": "x" * 5_000,
     }
+    assert tool_result["content"].startswith("\n\n[Cut here: the first 0 of 5000 characters.")
+    assert "context window of gpt-5.6 (2224 tokens)" in tool_result["content"]
 
 
 @pytest.mark.asyncio
@@ -356,7 +353,6 @@ async def test_injected_final_response_is_committed_before_the_injected_message(
         tools=tools,
         model="gpt-5.6",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         checkpoint_callback=checkpoint,
         injection_callback=inject,
     ))
@@ -385,7 +381,6 @@ async def test_runner_returns_max_iterations_fallback():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.stop_reason == "max_iterations"
@@ -428,7 +423,6 @@ async def test_runner_replaces_empty_tool_result_with_marker():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "done"
@@ -468,7 +462,6 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "final answer"
@@ -509,7 +502,6 @@ async def test_runner_does_not_retry_blank_policy_terminal(
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert provider.chat_stream_with_retry.await_count == 1
@@ -538,7 +530,6 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
@@ -569,7 +560,6 @@ async def test_empty_finalization_retry_runs_no_tool_it_returns():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     tools.execute.assert_not_awaited()
@@ -596,7 +586,6 @@ async def test_runner_length_recovery_returns_all_segments():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "first second third"
@@ -627,7 +616,6 @@ async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     limit_reached = (
@@ -666,7 +654,6 @@ async def test_runner_length_recovery_does_not_leak_across_tool_calls():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "final answer"
@@ -721,7 +708,6 @@ async def test_runner_empty_response_does_not_break_tool_chain():
         tools=tool_registry,
         model="test-model",
         max_iterations=10,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "Here are the results."
@@ -761,7 +747,6 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     # Usage should be accumulated across iterations
@@ -807,7 +792,6 @@ async def test_runner_passes_temperature_to_provider():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         temperature=0.7,
     ))
 
@@ -836,7 +820,6 @@ async def test_runner_passes_max_tokens_to_provider():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         max_tokens=8192,
     ))
 

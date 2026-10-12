@@ -10,7 +10,6 @@ import pytest
 
 from nanobot.dots.permissions import TOOL_PERMISSIONS
 from nanobot.dots.projection import (
-    MAX_TOOL_RESULT_CHARS,
     EngineSettings,
     dot_prompt_section,
     project,
@@ -32,7 +31,8 @@ def test_names_the_model_the_workspace_and_maps_the_limits(make_config: Callable
     assert result.max_cost_usd == 1
     # The context window is the model's own (OpenRouter's), read by the turn: the settings name none.
     assert not hasattr(result, "context_window_tokens")
-    assert result.max_tool_result_chars == MAX_TOOL_RESULT_CHARS == 12000
+    # Nor a fixed cut of a tool's result: what the window leaves decides it (ContextGovernor.result_room).
+    assert not hasattr(result, "max_tool_result_chars")
 
 
 def test_the_summary_role_names_a_model_and_defaults_to_the_dots_own(

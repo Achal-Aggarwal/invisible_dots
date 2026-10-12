@@ -13,7 +13,6 @@ import pytest
 from agent.runner_helpers import ScriptedTools, make_run_spec
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 @pytest.mark.asyncio
@@ -51,7 +50,6 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "done"
@@ -86,7 +84,6 @@ async def test_runner_strips_inline_think_content_from_the_answer():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "The answer is 42."
@@ -115,7 +112,6 @@ async def test_runner_strips_inline_think_even_when_a_reasoning_field_came_with_
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "The answer."

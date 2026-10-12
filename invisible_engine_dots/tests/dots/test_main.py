@@ -278,16 +278,19 @@ class FakeOpenRouter:
         await response.write(b"data: [DONE]\n\n")
         return response
 
-    async def _models(self, request: web.Request) -> web.Response:
-        # OpenRouter's list of models: each with the context window and the longest answer of the provider it
-        # routes to by default, which is what the engine reads its limits from.
-        model = {"id": "z-ai/glm-5.3-flash", "top_provider": {"context_length": 400_000, "max_completion_tokens": 128_000}}
-        return web.json_response({"data": [model]})
+    async def _endpoints(self, request: web.Request) -> web.Response:
+        # The providers OpenRouter lists for a model, with each one's window and longest answer: what the engine
+        # reads the model's limits from, on every turn.
+        model = request.match_info["model"]
+        if model != "z-ai/glm-5.3-flash":
+            return web.json_response({"error": {"message": "Not Found", "code": 404}}, status=404)
+        provider = {"provider_name": "stand-in", "tag": "stand-in", "context_length": 400_000, "max_completion_tokens": 128_000, "status": 0}
+        return web.json_response({"data": {"id": model, "endpoints": [provider]}})
 
     async def start(self) -> None:
         app = web.Application()
         app.router.add_post("/api/v1/chat/completions", self._completions)
-        app.router.add_get("/api/v1/models", self._models)
+        app.router.add_get("/api/v1/models/{model:.+}/endpoints", self._endpoints)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         await web.TCPSite(self.runner, "127.0.0.1", self.port).start()

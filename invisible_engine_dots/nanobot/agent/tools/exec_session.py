@@ -7,7 +7,6 @@ import codecs
 import shlex
 import time
 import uuid
-from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -34,8 +33,6 @@ MAX_YIELD_MS = 30_000
 DEFAULT_WAIT_FOR_MS = 10_000
 DEFAULT_UNTIL_EXIT_MS = 600_000
 MAX_WAIT_FOR_MS = 600_000
-DEFAULT_MAX_OUTPUT_CHARS = 10_000
-MAX_OUTPUT_CHARS = 50_000
 OUTPUT_DRAIN_GRACE_S = 0.1
 
 
@@ -156,7 +153,6 @@ class _SessionPoll:
     timed_out: bool = False
     terminated: bool = False
     stdin_closed: bool = False
-    truncated_chars: int = 0
 
 
 @dataclass(slots=True)
@@ -172,65 +168,24 @@ class ExecSessionInfo:
     tty: bool = False
 
 
-class _BoundedOutputBuffer:
-    """Keep the first and most recent characters within a fixed budget."""
+class _OutputBuffer:
+    """What a stream wrote since the last poll, kept whole until the poll drains it."""
 
-    def __init__(self, max_chars: int) -> None:
-        self.max_chars = max_chars
-        self._content = ""
-        self._tail: deque[str] = deque()
-        self._tail_chars = 0
-        self._total_chars = 0
-        self._truncated = False
+    def __init__(self) -> None:
+        self._chunks: list[str] = []
 
     @property
     def has_output(self) -> bool:
-        return self._total_chars > 0
-
-    @property
-    def retained_chars(self) -> int:
-        """How much the buffer holds now: never more than its bound, whatever was appended."""
-        return len(self._content) + self._tail_chars
+        return bool(self._chunks)
 
     def append(self, text: str) -> None:
-        if not text:
-            return
-        self._total_chars += len(text)
-        if not self._truncated:
-            combined = self._content + text
-            if len(combined) <= self.max_chars:
-                self._content = combined
-                return
-            head_chars = self.max_chars // 2
-            tail_chars = self.max_chars - head_chars
-            self._content = combined[:head_chars]
-            self._tail.append(combined[-tail_chars:])
-            self._tail_chars = tail_chars
-            self._truncated = True
-            return
+        if text:
+            self._chunks.append(text)
 
-        tail_chars = self.max_chars - len(self._content)
-        self._tail.append(text)
-        self._tail_chars += len(text)
-        while self._tail_chars > tail_chars:
-            excess = self._tail_chars - tail_chars
-            first = self._tail[0]
-            if len(first) <= excess:
-                self._tail.popleft()
-                self._tail_chars -= len(first)
-            else:
-                self._tail[0] = first[excess:]
-                self._tail_chars -= excess
-
-    def drain(self) -> tuple[str, int]:
-        output = self._content + "".join(self._tail)
-        truncated_chars = self._total_chars - len(output)
-        self._content = ""
-        self._tail.clear()
-        self._tail_chars = 0
-        self._total_chars = 0
-        self._truncated = False
-        return output, truncated_chars
+    def drain(self) -> str:
+        output = "".join(self._chunks)
+        self._chunks.clear()
+        return output
 
 
 class _ExecSession:
@@ -258,8 +213,8 @@ class _ExecSession:
         # timeout None/0 means no limit; an infinite deadline is never reached.
         self.deadline = time.monotonic() + timeout if timeout else float("inf")
         self.last_access = time.monotonic()
-        self._stdout = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
-        self._stderr = _BoundedOutputBuffer(MAX_OUTPUT_CHARS)
+        self._stdout = _OutputBuffer()
+        self._stderr = _OutputBuffer()
         self._lock = asyncio.Lock()
         self._timed_out = False
         self._kill_task: asyncio.Task[None] | None = None
@@ -284,7 +239,7 @@ class _ExecSession:
     async def _read_stream(
         self,
         stream: asyncio.StreamReader | None,
-        buffer: _BoundedOutputBuffer,
+        buffer: _OutputBuffer,
     ) -> None:
         if stream is None:
             return
@@ -322,7 +277,6 @@ class _ExecSession:
     async def poll(
         self,
         yield_time_ms: int,
-        max_output_chars: int,
         *,
         terminated: bool = False,
         stdin_closed: bool = False,
@@ -362,8 +316,8 @@ class _ExecSession:
             await self._wait_for_buffered_output()
 
         async with self._lock:
-            stdout, stdout_truncated = self._stdout.drain()
-            stderr, stderr_truncated = self._stderr.drain()
+            stdout = self._stdout.drain()
+            stderr = self._stderr.drain()
             if self.tty:
                 # One stream: the relay reads the terminal's master, so stderr only carries the
                 # relay's own messages, plain text. The stream's end flushes a cut sequence.
@@ -375,17 +329,14 @@ class _ExecSession:
         output_parts = [stdout] if stdout else []
         if stderr:
             output_parts.append(f"STDERR:\n{stderr}")
-        output = "\n".join(output_parts)
-        output, response_truncated = _truncate_output(output, max_output_chars)
         return _SessionPoll(
-            output=output,
+            output="\n".join(output_parts),
             done=self.process.returncode is not None,
             exit_code=self.process.returncode,
             elapsed_s=max(0.0, time.monotonic() - self.started_at),
             timed_out=self._timed_out,
             terminated=terminated,
             stdin_closed=stdin_closed,
-            truncated_chars=stdout_truncated + stderr_truncated + response_truncated,
         )
 
     async def kill(self) -> None:
@@ -447,7 +398,6 @@ class ExecSessionManager:
         cwd: str,
         timeout: int | None,
         yield_time_ms: int,
-        max_output_chars: int,
         owner_session_key: str | None = None,
         tty: bool = False,
     ) -> tuple[str, _SessionPoll]:
@@ -474,7 +424,7 @@ class ExecSessionManager:
             )
             self._sessions[session_id] = session
 
-        poll = await session.poll(yield_time_ms, max_output_chars)
+        poll = await session.poll(yield_time_ms)
         if poll.done:
             async with self._lock:
                 self._sessions.pop(session_id, None)
@@ -488,7 +438,6 @@ class ExecSessionManager:
         close_stdin: bool,
         terminate: bool,
         yield_time_ms: int,
-        max_output_chars: int,
         owner_session_key: str | None = None,
     ) -> _SessionPoll:
         async with self._lock:
@@ -513,7 +462,6 @@ class ExecSessionManager:
             await session.kill()
         poll = await session.poll(
             yield_time_ms,
-            max_output_chars,
             terminated=terminate,
             stdin_closed=stdin_closed,
         )
@@ -588,19 +536,8 @@ def clamp_session_int(value: int | None, default: int, minimum: int, maximum: in
     return min(max(value, minimum), maximum)
 
 
-def _truncate_output(output: str, max_output_chars: int) -> tuple[str, int]:
-    if len(output) <= max_output_chars:
-        return output, 0
-    head_chars = max_output_chars // 2
-    tail_chars = max_output_chars - head_chars
-    omitted = len(output) - max_output_chars
-    return output[:head_chars] + output[-tail_chars:], omitted
-
-
 def format_session_poll(session_id: str, poll: _SessionPoll) -> str:
     parts = [poll.output] if poll.output else []
-    if poll.truncated_chars:
-        parts.append(f"({poll.truncated_chars:,} chars truncated from output)")
     if poll.timed_out:
         parts.append("Error: Command timed out; session was terminated.")
     if poll.terminated and not poll.timed_out:
@@ -701,7 +638,6 @@ class ExecSessionTool(Tool):
                     close_stdin=False,
                     terminate=True,
                     yield_time_ms=0,
-                    max_output_chars=DEFAULT_MAX_OUTPUT_CHARS,
                     owner_session_key=current_request_session_key(),
                 )
                 result = format_session_poll(session_id, poll)
@@ -743,8 +679,7 @@ class ExecSessionTool(Tool):
         timeout_ms: int,
     ) -> str:
         deadline = time.monotonic() + (timeout_ms / 1000)
-        aggregate = _BoundedOutputBuffer(DEFAULT_MAX_OUTPUT_CHARS)
-        upstream_truncated = 0
+        aggregate = _OutputBuffer()
         search_overlap = ""
         first = True
         matched = False
@@ -758,11 +693,9 @@ class ExecSessionTool(Tool):
                 close_stdin=close_stdin if first else False,
                 terminate=False,
                 yield_time_ms=step_ms,
-                max_output_chars=MAX_OUTPUT_CHARS,
                 owner_session_key=current_request_session_key(),
             )
             first = False
-            upstream_truncated += poll.truncated_chars
             if poll.output:
                 aggregate.append(poll.output)
                 if wait_for is not None:
@@ -774,8 +707,7 @@ class ExecSessionTool(Tool):
             expired = time.monotonic() >= deadline
             has_activity = wait_for is None and not until_exit and bool(poll.output)
             if poll.done or matched or has_activity or expired:
-                poll.output, aggregate_truncated = aggregate.drain()
-                poll.truncated_chars = upstream_truncated + aggregate_truncated
+                poll.output = aggregate.drain()
                 result = format_session_poll(session_id, poll)
                 if wait_for is not None and not matched:
                     result += f"\nWait target not observed: {wait_for!r}"

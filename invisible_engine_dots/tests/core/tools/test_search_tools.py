@@ -285,7 +285,7 @@ async def test_grep_skips_documents_as_binary(tmp_path: Path, name: str) -> None
 
 
 @pytest.mark.asyncio
-async def test_grep_keeps_an_oversized_matching_line_visible(tmp_path: Path) -> None:
+async def test_grep_returns_an_oversized_matching_line_whole(tmp_path: Path) -> None:
     long_line = "x" * 130_000 + "needle" + "y" * 10_000
     (tmp_path / "huge-line.txt").write_text(long_line, encoding="utf-8")
     tool = GrepTool(computer=LocalComputer(tmp_path))
@@ -298,53 +298,26 @@ async def test_grep_keeps_an_oversized_matching_line_visible(tmp_path: Path) -> 
         context_after=0,
     )
 
-    assert "huge-line.txt:1" in result
-    assert "needle" in result
-    assert "No matches found" not in result
-    assert len(result) < GrepTool._MAX_RESULT_CHARS
+    assert result == f"huge-line.txt:1\n> 1| {long_line}"
 
 
 @pytest.mark.asyncio
-async def test_grep_size_limit_returns_a_resumable_offset(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    content = "\n".join(f"needle-{line}-" + "x" * 80 for line in range(1, 11))
-    (tmp_path / "many.txt").write_text(content, encoding="utf-8")
-    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 350)
+async def test_grep_returns_every_match_however_long_the_result(tmp_path: Path) -> None:
+    lines = [f"needle-{line}-" + "x" * 200 for line in range(1, 301)]
+    (tmp_path / "many.txt").write_text("\n".join(lines), encoding="utf-8")
     tool = GrepTool(computer=LocalComputer(tmp_path))
 
-    first = await tool.execute(
+    result = await tool.execute(
         pattern="needle",
         path="many.txt",
         fixed_strings=True,
         context_before=0,
         context_after=0,
-        head_limit=10,
+        head_limit=0,
     )
-    continuation = re.search(r"use offset=(\d+) to continue", first)
 
-    assert continuation is not None
-    next_offset = int(continuation.group(1))
-    assert next_offset > 0
-
-    second = await tool.execute(
-        pattern="needle",
-        path="many.txt",
-        fixed_strings=True,
-        context_before=0,
-        context_after=0,
-        head_limit=10,
-        offset=next_offset,
-    )
-    first_headers = {
-        line for line in first.splitlines() if line.startswith("many.txt:")
-    }
-    second_headers = {
-        line for line in second.splitlines() if line.startswith("many.txt:")
-    }
-    assert second_headers
-    assert first_headers.isdisjoint(second_headers)
+    assert len(result) > 60_000
+    assert result == "\n\n".join(f"many.txt:{n}\n> {n}| {text}" for n, text in enumerate(lines, 1))
 
 
 @pytest.mark.asyncio
@@ -618,16 +591,15 @@ async def test_grep_merges_context_and_pages_by_matches(tmp_path):
     assert "to continue" not in second
 
 
-async def test_grep_size_pages_do_not_lose_merged_matches(tmp_path, monkeypatch):
+async def test_grep_pages_do_not_lose_merged_matches(tmp_path):
     (tmp_path / "source.txt").write_text(
         "\n".join(f"needle {n} " + "x" * 50 for n in range(30)), encoding="utf-8",
     )
-    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 800)
     tool = GrepTool(computer=LocalComputer(tmp_path))
     seen = []
     offset = 0
     for _ in range(30):
-        result = await tool.execute(pattern="needle", offset=offset, head_limit=0)
+        result = await tool.execute(pattern="needle", offset=offset, head_limit=7)
         seen.extend(re.findall(r"^> (\d+)\|", result, re.M))
         continuation = re.search(r"use offset=(\d+) to continue", result)
         if continuation is None:
@@ -638,29 +610,25 @@ async def test_grep_size_pages_do_not_lose_merged_matches(tmp_path, monkeypatch)
     assert seen == [str(n) for n in range(1, 31)]
 
 
-async def test_grep_large_first_context_still_advances(tmp_path, monkeypatch):
-    (tmp_path / "source.txt").write_text("x" * 1000 + "\nneedle\n" + "x" * 1000, encoding="utf-8")
-    monkeypatch.setattr(GrepTool, "_MAX_RESULT_CHARS", 350)
+async def test_grep_returns_a_large_context_whole(tmp_path):
+    (tmp_path / "source.txt").write_text("x" * 5000 + "\nneedle\n" + "y" * 5000, encoding="utf-8")
     result = await GrepTool(computer=LocalComputer(tmp_path)).execute(pattern="needle")
-    assert "> 2| needle" in result
-    assert "use offset=1 to continue" in result
-    assert "No matches" not in result
+    assert result == f"source.txt:2\n  1| {'x' * 5000}\n> 2| needle\n  3| {'y' * 5000}"
 
 
 @pytest.mark.parametrize("mode", ["find_files", "files_with_matches", "count"])
-async def test_search_path_pages_respect_size_and_continue(tmp_path, monkeypatch, mode):
+async def test_search_path_pages_continue(tmp_path, mode):
     for n in range(20):
         target = tmp_path / (f"file-{n:02}-" + "x" * 50 + ".txt")
         target.write_text("needle", encoding="utf-8")
         os.utime(target, (1, 1))
     tool_class = FindFilesTool if mode == "find_files" else GrepTool
-    monkeypatch.setattr(tool_class, "_MAX_RESULT_CHARS", 200)
     tool = tool_class(computer=LocalComputer(tmp_path))
     args = {} if mode == "find_files" else {"pattern": "needle", "output_mode": mode}
     seen = []
     offset = 0
     for _ in range(20):
-        result = await tool.execute(offset=offset, head_limit=0, **args)
+        result = await tool.execute(offset=offset, head_limit=3, **args)
         seen.extend(re.findall(r"^(file-.*?\.txt)", result, re.M))
         continuation = re.search(r"use offset=(\d+) to continue", result)
         if continuation is None:
@@ -668,6 +636,22 @@ async def test_search_path_pages_respect_size_and_continue(tmp_path, monkeypatch
         assert int(continuation[1]) > offset
         offset = int(continuation[1])
     assert seen == sorted(path.name for path in tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("mode", ["find_files", "files_with_matches", "count"])
+async def test_search_path_lists_come_back_whole(tmp_path, mode):
+    for n in range(300):
+        target = tmp_path / (f"file-{n:03}-" + "x" * 100 + ".txt")
+        target.write_text("needle", encoding="utf-8")
+        os.utime(target, (1, 1))
+    tool = (FindFilesTool if mode == "find_files" else GrepTool)(computer=LocalComputer(tmp_path))
+    args = {} if mode == "find_files" else {"pattern": "needle", "output_mode": mode}
+
+    result = await tool.execute(head_limit=0, **args)
+
+    assert len(result) > 30_000
+    assert re.findall(r"^(file-.*?\.txt)", result, re.M) == sorted(path.name for path in tmp_path.iterdir())
+    assert "to continue" not in result
 
 
 @pytest.mark.parametrize("budget,value", [("_MAX_SCAN_PATHS", 0), ("_MAX_SCAN_SECONDS", 0)])
@@ -705,7 +689,7 @@ async def test_grep_marks_a_long_line_already_present_as_context(tmp_path):
     assert re.findall(r"^> (\d+)\|", result, re.M) == ["1", "2"]
     assert "needle first" in result and "needle late" in result
     assert result.count("source.txt:") == 1
-    assert len(result) < 2100
+    assert f"> 2| {'x' * 3000}needle late{'y' * 1000}" in result.splitlines()
 
 
 @pytest.mark.parametrize("mode", ["content", "count", "files_with_matches"])

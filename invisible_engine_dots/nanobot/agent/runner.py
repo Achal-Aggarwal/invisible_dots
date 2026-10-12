@@ -79,7 +79,6 @@ class AgentRunSpec:
     tools: ToolRegistry
     runtime: LLMRuntime
     max_iterations: int
-    max_tool_result_chars: int
     # The policy every tool call crosses before it runs: there is no run without one.
     gate: ToolGate
     # The turn's inputs, and how they become the transcript the model reads.
@@ -323,7 +322,6 @@ class AgentRunner:
             model=spec.runtime.model,
             tools=spec.tools,
             session_key=spec.session_key,
-            max_tool_result_chars=spec.max_tool_result_chars,
             context_window_tokens=spec.runtime.context_window_tokens,
             max_tokens=spec.runtime.generation.max_tokens,
         )
@@ -417,12 +415,15 @@ class AgentRunner:
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
-                        "content": self.context_governor.normalize_tool_result(
-                            governance_config,
-                            tool_call.name,
-                            result,
-                        ),
+                        "content": "",
                     }
+                    # The room is measured with this message in place, so its own framing counts.
+                    tool_message["content"] = self.context_governor.normalize_tool_result(
+                        governance_config,
+                        tool_call.name,
+                        result,
+                        self.context_governor.result_room(governance_config, [*messages, tool_message]),
+                    )
                     if event["status"] == "error":
                         tool_message[METADATA_KEY] = {IS_ERROR: True}
                     await self._commit(spec, messages, tool_message, "tool_result")

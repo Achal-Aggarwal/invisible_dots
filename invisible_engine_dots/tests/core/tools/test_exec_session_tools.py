@@ -15,14 +15,12 @@ from loguru import logger
 
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import (
-    MAX_OUTPUT_CHARS,
     ExecSessionManager,
     ExecSessionTool,
     ListExecSessionsTool,
-    _BoundedOutputBuffer,
     _ExecSession,
+    _OutputBuffer,
     _SessionPoll,
-    _truncate_output,
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
@@ -128,15 +126,16 @@ def test_exec_session_yield_returns_when_process_finishes_early(tmp_path):
     assert elapsed < 4.0
 
 
-def test_bounded_output_buffer_keeps_head_tail_and_exact_drop_count():
-    buffer = _BoundedOutputBuffer(10)
+def test_output_buffer_keeps_everything_until_drained():
+    buffer = _OutputBuffer()
 
     buffer.append("012345")
     buffer.append("6789ABCDEF")
 
-    assert buffer.retained_chars == 10
-    assert buffer.drain() == ("01234BCDEF", 6)
-    assert buffer.retained_chars == 0
+    assert buffer.has_output
+    assert buffer.drain() == "0123456789ABCDEF"
+    assert not buffer.has_output
+    assert buffer.drain() == ""
 
 
 async def test_exec_session_preserves_utf8_across_stdout_and_stderr_chunks():
@@ -161,12 +160,12 @@ async def test_exec_session_preserves_utf8_across_stdout_and_stderr_chunks():
     stderr.feed_eof()
     await asyncio.gather(session._stdout_task, session._stderr_task)
 
-    assert session._stdout.drain() == ("a" * 4095 + "你好🙂\ufffd", 0)
-    assert session._stderr.drain() == ("b" * 4094 + "🙂é\ufffd", 0)
+    assert session._stdout.drain() == "a" * 4095 + "你好🙂\ufffd"
+    assert session._stderr.drain() == "b" * 4094 + "🙂é\ufffd"
 
 
-def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):
-    async def run() -> tuple[int, int, str, int]:
+def test_exec_session_keeps_whole_unpolled_stdout_and_stderr(tmp_path):
+    async def run() -> str:
         manager = ExecSessionManager()
         tool = ExecTool(LocalComputer(tmp_path), timeout=5, session_manager=manager)
         command = _python_command(
@@ -175,11 +174,7 @@ def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):
             "sys.stderr.write('ERR_HEAD' + 'e' * 200000 + 'ERR_TAIL')"
         )
 
-        initial = await tool.execute(
-            command=command,
-            yield_time_ms=0,
-            max_output_chars=1000,
-        )
+        initial = await tool.execute(command=command, yield_time_ms=0)
         sid = _session_id(initial)
         session = manager._sessions[sid]
         await asyncio.wait_for(session.process.wait(), timeout=15)
@@ -187,28 +182,22 @@ def test_exec_session_bounds_unpolled_stdout_and_stderr(tmp_path):
             asyncio.gather(session._stdout_task, session._stderr_task),
             timeout=15,
         )
-        retained_stdout = session._stdout.retained_chars
-        retained_stderr = session._stderr.retained_chars
         poll = await manager.write(
             session_id=sid,
             chars=None,
             close_stdin=False,
             terminate=False,
             yield_time_ms=0,
-            max_output_chars=1000,
         )
-        return retained_stdout, retained_stderr, poll.output, poll.truncated_chars
+        return poll.output
 
-    retained_stdout, retained_stderr, output, truncated_chars = asyncio.run(run())
+    output = asyncio.run(run())
 
-    assert retained_stdout == 50000
-    assert retained_stderr == 50000
-    assert output.startswith("OUT_HEAD")
-    assert output.endswith("ERR_TAIL")
-    assert truncated_chars > 390000
+    assert output.startswith("OUT_HEAD" + "o" * 200000 + "OUT_TAIL")
+    assert output.endswith("ERR_HEAD" + "e" * 200000 + "ERR_TAIL")
 
 
-def test_exec_session_wait_for_keeps_aggregate_within_output_budget():
+def test_exec_session_wait_for_returns_every_poll_it_aggregated():
     async def run() -> str:
         manager = SimpleNamespace(
             write=AsyncMock(side_effect=[
@@ -229,16 +218,14 @@ def test_exec_session_wait_for_keeps_aggregate_within_output_budget():
 
     result = asyncio.run(run())
 
-    assert result.startswith("HEAD")
+    assert result.startswith("HEAD" + "a" * 5996 + "b" * 6000 + "c" * 5994 + "TARGET\n")
     assert "Wait target not observed" not in result
-    assert "(8,000 chars truncated from output)" in result
-    assert len(result) < 10100
+    assert "truncated" not in result
 
 
-def test_exec_session_wait_for_searches_before_response_truncation():
-    async def run() -> tuple[str, list[int]]:
-        output = "A" * 15000 + "TARGET" + "B" * 15000
-        observed_limits: list[int] = []
+def test_exec_session_wait_for_finds_target_inside_large_output():
+    async def run() -> str:
+        output = "A" * 150000 + "TARGET" + "B" * 150000
 
         async def write(
             *,
@@ -247,22 +234,14 @@ def test_exec_session_wait_for_searches_before_response_truncation():
             close_stdin: bool,
             terminate: bool,
             yield_time_ms: int,
-            max_output_chars: int,
             owner_session_key: str | None,
         ) -> _SessionPoll:
             del session_id, chars, close_stdin, terminate, yield_time_ms, owner_session_key
-            observed_limits.append(max_output_chars)
-            visible, truncated = _truncate_output(output, max_output_chars)
-            return _SessionPoll(
-                output=visible,
-                done=True,
-                exit_code=0,
-                truncated_chars=truncated,
-            )
+            return _SessionPoll(output=output, done=True, exit_code=0)
 
         manager = SimpleNamespace(write=AsyncMock(side_effect=write))
         tool = ExecSessionTool(manager=manager)
-        result = await tool._wait(
+        return await tool._wait(
             session_id="session",
             input=None,
             close_stdin=False,
@@ -270,26 +249,11 @@ def test_exec_session_wait_for_searches_before_response_truncation():
             until_exit=False,
             timeout_ms=1000,
         )
-        return result, observed_limits
-
-    result, observed_limits = asyncio.run(run())
-
-    assert observed_limits == [MAX_OUTPUT_CHARS]
-    assert "Wait target not observed" not in result
-    assert "(20,006 chars truncated from output)" in result
-    assert len(result) < 10100
-
-
-def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
-    async def run() -> str:
-        tool = ExecTool(LocalComputer(tmp_path), timeout=5)
-        command = _python_command("print('A' * 2000)")
-        return await tool.execute(command=command, max_output_tokens=1000)
 
     result = asyncio.run(run())
 
-    assert "chars truncated" in result
-    assert "Exit code: 0" in result
+    assert result.startswith("A" * 150000 + "TARGET" + "B" * 150000 + "\n")
+    assert "Wait target not observed" not in result
 
 
 def test_exec_can_continue_with_stdin(tmp_path):

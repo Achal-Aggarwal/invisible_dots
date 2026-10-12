@@ -25,7 +25,6 @@ from nanobot.providers.base import (
 )
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 def _build_transcript(transcript: TranscriptInput) -> list[dict]:
@@ -50,7 +49,6 @@ def _governance_config(
         model=spec.runtime.model,
         tools=tools,
         session_key=spec.session_key,
-        max_tool_result_chars=spec.max_tool_result_chars,
         context_window_tokens=spec.runtime.context_window_tokens,
         max_tokens=spec.runtime.generation.max_tokens,
     )
@@ -91,7 +89,6 @@ async def test_runner_propagates_context_governance_failure():
             tools=tools,
             model="test-model",
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
 
     provider.chat_stream_with_retry.assert_not_awaited()
@@ -138,7 +135,6 @@ async def test_runner_summarizes_history_and_preserves_current_input(monkeypatch
         context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     consolidate.assert_awaited_once_with(
@@ -185,7 +181,6 @@ async def test_runner_rejects_oversized_delta_without_summarizable_history(monke
             context_window_tokens=1_624,
             max_tokens=100,
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
 
     consolidate.assert_awaited_once_with(
@@ -235,7 +230,6 @@ async def test_runner_governs_history_before_summarizing_it(monkeypatch):
         context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     summarized = consolidate.await_args.args[0]
@@ -290,7 +284,6 @@ async def test_runner_keeps_current_tool_exchange_outside_summary(monkeypatch):
         context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     consolidate.assert_awaited_once_with(
@@ -326,6 +319,9 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     tools = ScriptedTools(AsyncMock(side_effect=["result-1", "result-2"]), definitions=[])
 
     def estimate(_provider, _model, messages, _tools):
+        if messages[0].get("role") == "tool":
+            # A result measured alone, as its cut measures it: its own size.
+            return len(messages[0]["content"]), "test-counter"
         system = messages[0].get("content")
         contents = {message.get("content") for message in messages}
         if "result-2" in contents:
@@ -353,7 +349,6 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
         context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert consolidate.await_count == 2
@@ -403,7 +398,6 @@ async def test_runner_refuses_checkpoint_that_cannot_fit_with_delta(monkeypatch)
             context_window_tokens=1_624,
             max_tokens=100,
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
 
     summarized = consolidate.await_args.args[0]
@@ -444,7 +438,6 @@ async def test_runner_governs_messages_added_by_before_iteration_hook(monkeypatc
             context_window_tokens=1_624,
             max_tokens=100,
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=MutatingHook(),
         ))
 
@@ -471,7 +464,6 @@ async def test_matching_reported_provider_usage_avoids_local_estimate(
         context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
     monkeypatch.setattr(
         "nanobot.agent.context_governance.estimate_prompt_tokens_chain",
@@ -516,7 +508,6 @@ async def test_changed_messages_use_local_estimate_after_reported_usage(monkeypa
         context_window_tokens=1_624,
         max_tokens=100,
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
     estimate = MagicMock(return_value=(600, "test-counter"))
     monkeypatch.setattr(
@@ -574,7 +565,6 @@ async def test_runner_refuses_oversized_request_without_compactor(
             context_window_tokens=context_window_tokens,
             max_tokens=100,
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         ))
 
     assert exc_info.value.estimated_tokens == 2_000
@@ -685,7 +675,6 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert all(
@@ -737,7 +726,6 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     synthetic = [

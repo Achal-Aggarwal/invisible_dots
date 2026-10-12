@@ -306,13 +306,6 @@ def content_with_media_breadcrumbs(
     return f"{content}\n{breadcrumbs}" if content else breadcrumbs
 
 
-def truncate_text(text: str, max_chars: int) -> str:
-    """Truncate text with a stable suffix."""
-    if max_chars <= 0 or len(text) <= max_chars:
-        return text
-    return text[:max_chars] + _TRUNCATED_SUFFIX
-
-
 def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
     """Truncate text to a token budget with a stable suffix.
 

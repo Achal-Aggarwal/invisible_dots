@@ -567,20 +567,17 @@ async def test_exec_always_returns_exit_code(tmp_path) -> None:
     assert "hello" in result
 
 
-async def test_exec_head_tail_truncation(tmp_path) -> None:
-    """Long output should preserve both head and tail."""
+async def test_exec_returns_whole_output(tmp_path) -> None:
+    """A long output comes back whole, its first and last character included."""
     tool = ExecTool(LocalComputer(tmp_path))
-    # Generate output that exceeds _MAX_OUTPUT (10_000 chars). The output-generating
-    # logic lives in a script file, so the command line needs no quoting of code.
+    # The output-generating logic lives in a script file, so the command line needs no
+    # quoting of code.
     script_file = tmp_path / "gen_output.py"
-    script_file.write_text("print('A' * 6000 + chr(10) + 'B' * 6000)", encoding="utf-8")
+    script_file.write_text("print('F' + 'x' * 199998 + 'L')", encoding="utf-8")
     command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
     result = await tool.execute(command=command)
-    assert "chars truncated" in result
-    # Head portion should start with As
-    assert result.startswith("A")
-    # Tail portion should end with the exit code which comes after Bs
-    assert "Exit code:" in result
+    assert result.startswith("F" + "x" * 199998 + "L\n")
+    assert result.endswith("Exit code: 0")
 
 
 async def test_exec_timeout_parameter(tmp_path) -> None:

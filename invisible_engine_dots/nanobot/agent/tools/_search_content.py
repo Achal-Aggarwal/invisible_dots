@@ -1,4 +1,4 @@
-"""Build one bounded grep page from streams of source lines."""
+"""Build one page of grep matches from streams of source lines."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from collections import deque
 from dataclasses import dataclass, field
 from itertools import chain, islice
-from typing import Iterable, Literal
+from typing import Iterable
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,30 +17,9 @@ class SourceLine:
     line_no: int
 
 
-class MatchTooLargeError(ValueError):
-    """A match and its line number cannot fit in an empty page."""
-
-
-def _clip_line(text: str, limit: int, match_start: int | None) -> str:
-    if len(text) <= limit:
-        return text
-    marker = "..."
-    available = limit - len(marker)
-    if match_start is None:
-        return text[:available] + marker
-    start = min(max(0, match_start - available // 3), len(text) - available)
-    end = start + available
-    prefix = marker if start else ""
-    suffix = marker if end < len(text) else ""
-    visible = text[start:end]
-    if prefix and suffix:
-        visible = visible[: available - len(marker)]
-    return prefix + visible + suffix
-
-
-def _format_line(line: SourceLine, start: int | None, limit: int) -> str:
-    marker = ">" if start is not None else " "
-    return f"{marker} {line.line_no}| {_clip_line(line.text, limit, start)}"
+def _format_line(line: SourceLine, is_match: bool) -> str:
+    marker = ">" if is_match else " "
+    return f"{marker} {line.line_no}| {line.text}"
 
 
 def _format_header(path: str, line: SourceLine) -> str:
@@ -53,13 +32,10 @@ class ContentPage:
 
     limit: int | None
     offset: int
-    max_chars: int
-    line_limit: int
     blocks: list[list[str]] = field(default_factory=list, init=False)
     seen: int = field(default=0, init=False)
     returned: int = field(default=0, init=False)
-    chars: int = field(default=0, init=False)
-    stopped: Literal["limit", "size"] | None = field(default=None, init=False)
+    stopped: bool = field(default=False, init=False)
 
     def scan(
         self, path: str, lines: Iterable[SourceLine], regex: re.Pattern[str],
@@ -75,64 +51,39 @@ class ContentPage:
                 self.seen += 1
                 if self.seen > self.offset:
                     if self.limit is not None and self.returned >= self.limit:
-                        self.stopped = "limit"
+                        self.stopped = True
                         return
-                    self._append_match(path, history, following, match.start(), positions)
-                    if self.stopped:
-                        return
+                    self._append_match(path, history, following, positions)
             history.append(following.popleft())
             if (line := next(source, None)) is not None:
                 following.append(line)
 
     def _append_match(
         self, path: str, history: deque[SourceLine],
-        following: deque[SourceLine], start: int, positions: dict[int, int],
+        following: deque[SourceLine], positions: dict[int, int],
     ) -> None:
         match = following[0]
         last_line = next(reversed(positions), 0)
         first_line = history[0] if history else match
         merge = bool(positions and first_line.line_no <= last_line)
-        header = "" if merge else _format_header(path, match)
-        replacement = _format_line(match, start, self.line_limit)
-        additions = [
-            (line.line_no, replacement if line is match else _format_line(line, None, self.line_limit))
-            for line in chain(history, following)
-            if not merge or line.line_no > last_line
-        ]
-        replace_at = positions.get(match.line_no) if merge else None
-        replacement_chars = (
-            len(replacement) - len(self.blocks[-1][replace_at]) if replace_at is not None else 0
-        )
-        header_chars = len(header) + (2 if self.blocks else 0) if not merge else 0
-        added_chars = header_chars + sum(len(text) + 1 for _, text in additions) + replacement_chars
-        if self.chars + added_chars > self.max_chars:
-            self.stopped = "size"
-            if self.blocks:
-                return
-            # Even an oversized first context must return a match and advance the offset.
-            additions = [(match.line_no, replacement)]
-            added_chars = header_chars + len(replacement) + 1
-            if added_chars > self.max_chars:
-                raise MatchTooLargeError("match exceeds output budget; narrow path or pattern")
         if not merge:
-            self.blocks.append([header])
+            self.blocks.append([_format_header(path, match)])
             positions.clear()
         block = self.blocks[-1]
-        if replace_at is not None:
-            block[replace_at] = replacement
-        for line_number, text in additions:
-            positions[line_number] = len(block)
-            block.append(text)
-        self.chars += added_chars
+        # A match already on the page as the previous match's context is marked in place.
+        if merge and match.line_no in positions:
+            block[positions[match.line_no]] = _format_line(match, True)
+        for line in chain(history, following):
+            if not merge or line.line_no > last_line:
+                positions[line.line_no] = len(block)
+                block.append(_format_line(line, line is match))
         self.returned += 1
 
     def render(self, no_matches: str) -> tuple[str, str | None]:
         result = "\n\n".join("\n".join(block) for block in self.blocks) or no_matches
-        if self.stopped == "limit":
-            note = f"pagination: limit={self.limit}, offset={self.offset}"
-        elif self.stopped == "size":
-            note = "output truncated due to size"
-        else:
-            note = f"(pagination: offset={self.offset})" if self.offset and self.blocks else None
-            return result, note
-        return result, f"({note}; use offset={self.offset + self.returned} to continue)"
+        if self.stopped:
+            return result, (
+                f"(pagination: limit={self.limit}, offset={self.offset}; "
+                f"use offset={self.offset + self.returned} to continue)"
+            )
+        return result, f"(pagination: offset={self.offset})" if self.offset and self.blocks else None

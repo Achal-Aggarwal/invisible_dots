@@ -8,7 +8,6 @@ from agent.runner_helpers import ScriptedTools, make_run_spec
 from nanobot.agent.runner import AgentRunner
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 async def test_runner_does_not_abort_when_a_tool_is_refused_by_the_os():
@@ -34,7 +33,6 @@ async def test_runner_does_not_abort_when_a_tool_is_refused_by_the_os():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert provider.chat_stream_with_retry.await_count == 2, (

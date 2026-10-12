@@ -1386,8 +1386,14 @@ The tool calls of one response run one at a time, in the order the model
 gave them. Only the response's `tool_calls` count: a call written in the
 assistant's text runs nothing. The registry validates a call's arguments
 before the policy sees it: an unknown tool or invalid arguments never reach
-the gate and never run, and the model gets the error. A result longer than
-12000 characters is cut, once.
+the gate and never run, and the model gets the error. A result comes back
+whole: no tool has a fixed cap. A request that outgrows the model's window is
+compacted first (old results cleared, then the history summarized, section
+8.5); only if it still does not fit are the results of its latest round cut,
+to what the window leaves (`ContextGovernor.fit_latest_round`), and the cut says
+how many characters came through of how many and how to ask for less. A result
+is stored cut only beyond what no compaction could make room for: the window
+less the system prompt and the tool definitions.
 
 ### 8.4 Policy
 
@@ -1415,11 +1421,19 @@ the OpenAI format, `tool_choice: "auto"`, every request streamed (with
 `stream_options.include_usage`, so the final chunk carries the usage and the
 cost, section 8.2).
 
-Every request uses the whole of what its model can do. The engine reads each
-model's limits once from OpenRouter's list of models (`GET /models`): the
-context window and the longest answer of the provider OpenRouter routes the
-model to by default (`top_provider`). A model OpenRouter does not list fails
-the turn in words; a router that publishes no limits gets none. Each request
+Every request uses the whole of what its model can do. The engine reads the
+model's limits at the start of every turn from the providers OpenRouter lists
+for it (`GET /models/{model}/endpoints`), not once: an engine runs for weeks and
+OpenRouter changes a model's providers meanwhile. Of the providers serving it,
+the widest window and the longest answer at that window are the model's, and
+the model's requests go only to the providers of that window (`provider.only`,
+by the slug OpenRouter lists for each): OpenRouter routes a request by the
+answer it asks for but not by the prompt it carries, so one sized for the
+widest window could otherwise land on a narrower provider and fail there. This
+gives up the narrower providers as fallbacks; when none of the widest can
+serve, OpenRouter refuses the request ("No allowed providers are available")
+and the turn fails with those words. A model OpenRouter does not know fails the
+turn in words; a router, which lists no provider, gets no limits and no route. Each request
 sends the longest answer as `max_tokens`, or what the window leaves after the
 prompt when that is less (OpenRouter refuses more, and without a `max_tokens`
 each provider applies a default of its own), so no answer is cut shorter than
@@ -1428,8 +1442,9 @@ the model allows. A response cut there all the same (`finish_reason:
 them and the model is asked to go on, a bounded number of times; a response cut
 before any text (the budget went to a call that never finished) is told that
 nothing ran and to do the work in smaller steps. Retries with exponential backoff on 429 and 5xx (at most 4
-attempts, honouring `Retry-After`). Tool results longer than 12000 characters
-are cut with a marker.
+attempts, honouring `Retry-After`). A tool result is cut only where the
+model's window ends (section 8.3), with a marker that says how much came
+through.
 
 ### 8.6 Memory
 
@@ -1699,8 +1714,7 @@ Before it serves it checks that no other engine owns the state.
   the zod schema), stored in `dots_kv` and projected in process
   (`projection.py`): the OpenRouter model id, the tools offered (those of the
   table whose permission is `allow` or `ask`), `max_steps_per_task` as the
-  step limit, the 12000-character
-  result cap, and the Dot's section of
+  step limit, and the Dot's section of
   the system prompt (its name and instructions, then nanobot's tool
   contract, a short note on its computer, the memory notes, MEMORY.md, where the past conversations are,
   and the day).

@@ -63,7 +63,6 @@ async def test_active_run_keeps_provider_captured_at_admission() -> None:
         tools=tools,
         runtime=selected_runtime,
         max_iterations=2,
-        max_tool_result_chars=16_000,
         gate=AllowAllGate(),
         consolidate_history=failed_test_consolidator,
         session_key="webui:cache-test",

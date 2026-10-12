@@ -188,29 +188,22 @@ class Handler(BaseHTTPRequestHandler):
                         "lastUser": text_of(last_user.get("content") if last_user else None)[-400:],
                     },
                 )
-        if self.command == "GET" and "/models" in self.path:
-            # Each model with the window and the longest answer of its default provider, which the engine reads
-            # its limits from. smoke/small's window is small enough for a thread of the run to outgrow it.
-            def model(model_id: str, window: int, answer: int) -> dict:
-                return {
-                    "id": model_id,
-                    "name": "stand-in",
-                    "context_length": window,
-                    "top_provider": {"context_length": window, "max_completion_tokens": answer},
-                    "pricing": {"prompt": "0", "completion": "0"},
-                    "supported_parameters": ["tools", "tool_choice", "max_tokens"],
-                }
-
-            self._send_json(
-                200,
-                {
-                    "data": [
-                        model("openai/gpt-4o-mini", 128000, 16384),
-                        model("smoke/small", 24000, 4096),
-                        model("smoke/summarizer", 24000, 4096),
-                    ]
-                },
-            )
+        if self.command == "GET" and "/models/" in self.path and self.path.endswith("/endpoints"):
+            # The providers of a model, each with its window and longest answer, which the engine reads the
+            # model's limits from on every turn. smoke/small's window is small enough for a thread of the run to
+            # outgrow it.
+            limits = {
+                "openai/gpt-4o-mini": (128000, 16384),
+                "smoke/small": (24000, 4096),
+                "smoke/summarizer": (24000, 4096),
+            }
+            model_id = self.path.split("/models/", 1)[1][: -len("/endpoints")]
+            if model_id not in limits:
+                self._send_json(404, {"error": {"message": "Not Found", "code": 404}})
+                return
+            window, answer = limits[model_id]
+            provider = {"provider_name": "stand-in", "tag": "stand-in", "context_length": window, "max_completion_tokens": answer, "status": 0}
+            self._send_json(200, {"data": {"id": model_id, "endpoints": [provider]}})
             return
         if "/chat/completions" not in self.path:
             self.send_response(404)
