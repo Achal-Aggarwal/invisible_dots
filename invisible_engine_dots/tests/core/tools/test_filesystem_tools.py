@@ -104,30 +104,31 @@ class TestReadFileTool:
         assert result == "Error reading file: Unknown path"
 
     @pytest.mark.asyncio
-    async def test_char_budget_trims(self, tool, tmp_path):
-        """When the selected slice exceeds _MAX_CHARS the output is trimmed."""
+    async def test_large_file_comes_back_whole(self, tool, tmp_path):
         f = tmp_path / "big.txt"
-        # Each line is ~110 chars, 2000 lines ≈ 220 KB > 128 KB limit
-        f.write_text("\n".join("x" * 110 for _ in range(2000)), encoding="utf-8")
+        lines = [f"{n:05d}" + "x" * 294 for n in range(1, 1001)]
+        f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        assert len(f.read_text(encoding="utf-8")) == 300_000
+
         result = await tool.execute(path=str(f))
-        assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
-        assert "Use offset=" in result
+
+        assert result == "\n".join(f"{n}| {line}" for n, line in enumerate(lines, 1)) + (
+            "\n\n(End of file - 1000 lines total)"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("following", ["", "\nsecond line"])
-    async def test_oversized_first_line_is_explicitly_truncated(self, tool, tmp_path, following):
+    async def test_long_first_line_comes_back_whole(self, tool, tmp_path, following):
         f = tmp_path / "minified.txt"
-        original = "界" * (ReadFileTool._MAX_CHARS + 100) + "OMITTED" + following
+        line = "界" * 300_000 + "TAIL"
+        original = line + following
         f.write_text(original, encoding="utf-8")
 
         with file_read_context("read-1", lambda: {}):
             first = await tool.execute(path=str(f), limit=1)
 
-        assert first.startswith("1| 界")
-        assert "OMITTED" not in first
-        assert len(first) <= ReadFileTool._MAX_CHARS + 500
-        assert "Line 1 truncated; its remaining characters are not shown" in first
-        assert "Use exec" in first
+        assert first.split("\n\n")[0] == "1| " + line
+        assert "truncated" not in first
         assert "column" not in tool.parameters["properties"]
         assert f.read_text(encoding="utf-8") == original
 
@@ -146,34 +147,16 @@ class TestReadFileTool:
             assert "Use offset=" not in first
 
     @pytest.mark.asyncio
-    async def test_long_middle_line_advances_to_following_content(self, tool, tmp_path):
+    async def test_long_middle_line_does_not_stop_the_read(self, tool, tmp_path):
         f = tmp_path / "bundle.txt"
-        f.write_text("first\n" + "z" * (ReadFileTool._MAX_CHARS * 2) + "\nlast\n")
+        middle = "z" * 300_000
+        f.write_text("first\n" + middle + "\nlast\n")
 
-        first = await tool.execute(path=str(f))
-        assert "Use offset=2 to continue" in first
-        assert "truncated" not in first
+        whole = await tool.execute(path=str(f))
+        assert whole == f"1| first\n2| {middle}\n3| last\n\n(End of file - 3 lines total)"
 
-        second = await tool.execute(path=str(f), offset=2)
-        assert second.startswith("2| z")
-        assert len(second) <= ReadFileTool._MAX_CHARS + 500
-        assert "Line 2 truncated" in second
-        assert "Use offset=3 to continue" in second
-
-        third = await tool.execute(path=str(f), offset=3)
-        assert "3| last" in third
-        assert "End of file" in third
-
-    @pytest.mark.asyncio
-    async def test_line_exactly_fitting_budget_is_not_truncated(self, tool, tmp_path):
-        f = tmp_path / "exact.txt"
-        line = "x" * (ReadFileTool._MAX_CHARS - len("1| "))
-        f.write_text(line + "\nlast")
-
-        first = await tool.execute(path=str(f))
-        assert first.split("\n\n")[0] == "1| " + line
-        assert "truncated" not in first
-        assert "Use offset=2 to continue" in first
+        second = await tool.execute(path=str(f), offset=2, limit=1)
+        assert second == f"2| {middle}\n\n(Showing lines 2-2 of 3. Use offset=3 to continue.)"
 
     @pytest.mark.asyncio
     async def test_oversized_file_is_rejected_before_read(self, tool, tmp_path, monkeypatch):

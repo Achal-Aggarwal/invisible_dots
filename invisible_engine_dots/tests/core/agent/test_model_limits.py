@@ -114,7 +114,6 @@ def _request_state(messages: list[dict[str, Any]], window: int, longest_answer: 
         context_window_tokens=window,
         max_tokens=longest_answer,
         max_iterations=1,
-        max_tool_result_chars=1_000_000,
         consolidate_history=consolidate,
     )
     _, compaction = ContextCompactionState.from_transcript(
@@ -126,7 +125,6 @@ def _request_state(messages: list[dict[str, Any]], window: int, longest_answer: 
             model="m",
             tools=MagicMock(),
             session_key="s",
-            max_tool_result_chars=1_000_000,
             context_window_tokens=window,
             max_tokens=longest_answer,
         ),

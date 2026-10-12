@@ -230,7 +230,6 @@ class TestTheGateAtTheBoundary:
                 tools=registry_of(),
                 runtime=MagicMock(),
                 max_iterations=1,
-                max_tool_result_chars=1,
                 transcript_input=MagicMock(),
                 transcript_builder=MagicMock(),
                 consolidate_history=MagicMock(),
@@ -269,7 +268,6 @@ async def run_with_checkpoints(
         tools=tools,
         model="test-model",
         max_iterations=max_iterations,
-        max_tool_result_chars=16_000,
         checkpoint_callback=checkpoint,
         gate=gate,
         session_key="s1",
@@ -332,7 +330,6 @@ class TestTheCheckpointContract:
             tools=tools,
             model="test-model",
             max_iterations=3,
-            max_tool_result_chars=16_000,
             checkpoint_callback=record,
         ))
 

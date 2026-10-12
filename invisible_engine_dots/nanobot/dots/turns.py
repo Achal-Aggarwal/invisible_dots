@@ -347,7 +347,6 @@ class TurnRunner:
             tools=tools,
             runtime=runtime,
             max_iterations=settings.max_iterations,
-            max_tool_result_chars=settings.max_tool_result_chars,
             transcript_input=TranscriptInput(
                 history=history,
                 current_message=None,

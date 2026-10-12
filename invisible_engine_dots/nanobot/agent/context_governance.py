@@ -7,6 +7,7 @@ messages, but it must not mutate an existing session history list in place.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -25,7 +26,6 @@ from nanobot.session.summary import (
 from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
-    truncate_text,
 )
 from nanobot.utils.runtime import ensure_nonempty_tool_result
 
@@ -40,8 +40,6 @@ HistoryConsolidator = Callable[
     Awaitable[str | None],
 ]
 
-# read_file has its own bound, so its result is not cut to max_tool_result_chars.
-TOOL_RESULT_CUT_EXEMPT_TOOLS = frozenset({"read_file"})
 BACKFILL_CONTENT = "[Tool result unavailable - call was interrupted or lost]"
 # A request is compacted only when it reaches its model's own window, less the room kept for the answer: 20000
 # tokens, or the model's longest answer when that is shorter (opencode's rule, MIT:
@@ -55,6 +53,8 @@ ANSWER_ROOM_TOKENS = 20_000
 CLEAR_PROTECT_TOKENS = 40_000
 CLEAR_MINIMUM_TOKENS = 20_000
 CLEARED_TOOL_RESULT = "[Old tool result cleared to save context; call the tool again if you need it.]"
+# The note at the end of a result cut to fit the window (ContextGovernor._cut_note): what was kept, of how much.
+_CUT_NOTE = re.compile(r"\n\n\[Cut here: the first (\d+) of (\d+) characters\. [^\n]*\]\Z")
 PLACEHOLDER_TEXTS = frozenset({
     "[Previous assistant message omitted.]",
 })
@@ -122,7 +122,6 @@ class ContextGovernanceConfig:
     model: str
     tools: ToolRegistry
     session_key: str | None
-    max_tool_result_chars: int
     context_window_tokens: int | None = None
     max_tokens: int | None = None
 
@@ -283,7 +282,9 @@ class ContextGovernor:
         updated = self.strip_malformed_tool_calls(updated)
         updated = self.drop_orphan_tool_results(updated)
         updated = self.backfill_missing_tool_results(updated)
-        return self.apply_tool_result_budget(config, updated)
+        # No result is cut here: a request that does not fit is compacted first, and only then are the results of
+        # its latest round cut to what the window leaves (`fit_latest_round`).
+        return self.ensure_nonempty_results(updated)
 
     def ensure_request_fits(
         self,
@@ -361,7 +362,7 @@ class ContextGovernor:
         tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         """Replace accepted history H with a checkpoint while preserving delta."""
-        measured, _source = pressure
+        measured, source = pressure
         delta_messages = compaction.delta_after_accepted(messages)
         consolidation_prefix = self.prepare_messages_for_model(
             state.config,
@@ -372,12 +373,17 @@ class ContextGovernor:
             compaction.active_summary,
         )
         if not summary:
-            raise ContextWindowExceededError(
-                session_key=state.config.session_key,
-                estimated_tokens=measured,
-                input_budget=self.input_budget(state.config),
-                source=_source,
-            )
+            # Nothing older to summarize: what is left to give way is the latest round's results, if it has any.
+            current = self.prepare_messages_for_model(state.config, messages)
+            fitted = self.fit_latest_round(state.config, current, tool_definitions)
+            if fitted is current:
+                raise ContextWindowExceededError(
+                    session_key=state.config.session_key,
+                    estimated_tokens=measured,
+                    input_budget=self.input_budget(state.config),
+                    source=source,
+                )
+            return self.ensure_request_fits(state.config, fitted, tool_definitions=tool_definitions)
 
         compaction.active_summary = summary
         # Fresh user input defines the next task. Only ongoing work without
@@ -398,7 +404,7 @@ class ContextGovernor:
         state.usage = None
         prepared = self.ensure_request_fits(
             state.config,
-            prepared,
+            self.fit_latest_round(state.config, prepared, tool_definitions),
             tool_definitions=tool_definitions,
         )
         compaction.summary_checkpoint = SessionSummaryCheckpoint(
@@ -509,18 +515,75 @@ class ContextGovernor:
             updated[index] = {**messages[index], "content": CLEARED_TOOL_RESULT}
         return updated
 
+    def result_room(self, config: ContextGovernanceConfig, messages: list[dict[str, Any]]) -> int | None:
+        """The most the content of the last of `messages`, a tool result with none yet, could ever take: the
+        model's prompt budget less what no compaction removes (the system prompt, the tool definitions) and the
+        result's own framing. A result is stored cut there because beyond it nothing of it could reach the model;
+        whether it fits a given request is `fit_latest_round`'s to say, after compaction. None when the window is
+        not known; then nothing is cut.
+        """
+        if not config.context_window_tokens:
+            return None
+        kept = [message for message in messages[:-1] if message.get("role") == "system"]
+        used, _ = estimate_prompt_tokens_chain(
+            config.provider, config.model, [*kept, messages[-1]], config.tools.get_definitions(),
+        )
+        return max(0, self.input_budget(config) - used - 1)
+
+    def fit_latest_round(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """The request with the results of its latest round of tool calls cut so that it fits the budget, when
+        it does not fit as it is: what is left once compaction did what it could (clearing old results, then
+        the summary) is the window's to give, and only these results can still give way.
+
+        The results share what the window leaves in their order, each keeping the room of the notes of the
+        results after it; the request is one token short of the budget, because one that reaches it is
+        compacted. When even empty results would not fit, the request is returned as it is, and does not fit.
+        """
+        budget = self.input_budget(config)
+        last_call = max((i for i, m in enumerate(messages) if m.get("role") == "assistant"), default=-1)
+        results = [i for i in range(last_call + 1, len(messages)) if messages[i].get("role") == "tool"]
+        if not config.context_window_tokens or budget <= 0 or not results:
+            return messages
+        estimate = estimate_prompt_tokens_chain(config.provider, config.model, messages, tool_definitions)[0]
+        if estimate < budget:
+            return messages
+        updated = list(messages)
+        for n, index in enumerate(results):
+            trial = [
+                {**message, "content": ""} if i in results and i >= index else message
+                for i, message in enumerate(updated)
+            ]
+            used, _ = estimate_prompt_tokens_chain(config.provider, config.model, trial, tool_definitions)
+            later = len(results) - n - 1
+            room = max(0, budget - used - later * self._note_tokens(config) - 1)
+            message = updated[index]
+            updated[index] = {
+                **message,
+                "content": self.normalize_tool_result(
+                    config, str(message.get("name") or "tool"), message.get("content"), room,
+                ),
+            }
+        return updated
+
     @staticmethod
     def normalize_tool_result(
         config: ContextGovernanceConfig,
         tool_name: str,
         result: Any,
+        room: int | None,
     ) -> Any:
-        """A tool result as the model gets it: never empty, and its text cut to max_tool_result_chars."""
+        """A tool result as the model gets it: never empty, and whole unless its text takes more than `room` tokens
+        (`result_room`); then it is cut there, and the cut says how much came through and how to get the rest."""
         result = ensure_nonempty_tool_result(tool_name, result)
-        if tool_name in TOOL_RESULT_CUT_EXEMPT_TOOLS:
+        if room is None:
             return result
         if isinstance(result, str):
-            return truncate_text(result, config.max_tool_result_chars)
+            return ContextGovernor._fit(config, result, room)
         if isinstance(result, list):
             blocks = cast(list[object], result)
             for raw_block in blocks:
@@ -531,13 +594,83 @@ class ContextGovernor:
                     return result
                 if block["type"] == "text" and not isinstance(block.get("text"), str):
                     return result
-            # Image redaction must not change how neighboring text is normalized.
-            return [
-                {**block, "text": truncate_text(block["text"], config.max_tool_result_chars)}
-                if block["type"] == "text" else block
-                for block in cast(list[dict[str, Any]], blocks)
-            ]
+            # The text blocks share the room in their order, each keeping the room of the notes of the text blocks
+            # after it; an image block is left as it is.
+            fitted: list[dict[str, Any]] = []
+            to_come = sum(1 for block in cast(list[dict[str, Any]], blocks) if block["type"] == "text")
+            for block in cast(list[dict[str, Any]], blocks):
+                if block["type"] == "text":
+                    to_come -= 1
+                    reserved = to_come * ContextGovernor._note_tokens(config)
+                    text = ContextGovernor._fit(config, block["text"], max(0, room - reserved))
+                    room = max(0, room - ContextGovernor._tokens(config, text))
+                    block = {**block, "text": text}
+                fitted.append(block)
+            return fitted
         return result
+
+    @staticmethod
+    def _cut_note(config: ContextGovernanceConfig, kept: int, total: int) -> str:
+        return (
+            f"\n\n[Cut here: the first {kept} of {total} characters. The whole result does not fit in the context "
+            f"window of {config.model} ({config.context_window_tokens} tokens) beside the rest of the request; ask "
+            "for less to see the rest: a narrower selector, a pattern, an offset and a limit.]"
+        )
+
+    @staticmethod
+    def _tokens(config: ContextGovernanceConfig, text: str) -> int:
+        """What `text` adds to a request as a tool result, by the estimate that decides whether the request fits
+        (`estimate_prompt_tokens_chain`), so a cut and the check that follows it count alike."""
+        def measured(content: str) -> int:
+            message = {"role": "tool", "tool_call_id": "call", "name": "tool", "content": content}
+            return estimate_prompt_tokens_chain(config.provider, config.model, [message], None)[0]
+
+        return max(0, measured(text) - measured(""))
+
+    @staticmethod
+    def _note_tokens(config: ContextGovernanceConfig) -> int:
+        """The most a cut's note can take: its numbers at their longest."""
+        return ContextGovernor._tokens(config, ContextGovernor._cut_note(config, 10**12, 10**12))
+
+    @staticmethod
+    def _fit(config: ContextGovernanceConfig, text: str, room: int) -> str:
+        """`text` whole when it takes at most `room` tokens; else its longest start that fits beside the note."""
+        whole = ContextGovernor._tokens(config, text)
+        if whole <= room:
+            return text
+        # A result stored cut is cut again from what was kept, and its note keeps the length of the whole result.
+        total = len(text)
+        earlier = _CUT_NOTE.search(text)
+        if earlier is not None:
+            text, total = text[: earlier.start()], int(earlier.group(2))
+
+        def cut(kept: int) -> str:
+            return text[:kept] + ContextGovernor._cut_note(config, kept, total)
+
+        # The longest start that fits, found by halving: the estimate is not additive, so each try is measured
+        # whole. Tokens grow with characters, so the start is searched within twice its proportional share.
+        low, high = 0, min(len(text), 2 * len(text) * room // whole + 1)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if ContextGovernor._tokens(config, cut(middle)) <= room:
+                low = middle
+            else:
+                high = middle - 1
+        return cut(low)
+
+    @staticmethod
+    def ensure_nonempty_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Every tool result of a request has content: a provider rejects an empty one."""
+        updated = messages
+        for idx, message in enumerate(messages):
+            if message.get("role") != "tool":
+                continue
+            content = ensure_nonempty_tool_result(str(message.get("name") or "tool"), message.get("content"))
+            if content != message.get("content"):
+                if updated is messages:
+                    updated = [dict(m) for m in messages]
+                updated[idx]["content"] = content
+        return updated
 
     @staticmethod
     def strip_placeholder_assistant_messages(
@@ -722,24 +855,4 @@ class ContextGovernor:
                 "content": BACKFILL_CONTENT,
             })
             offset += 1
-        return updated
-
-    def apply_tool_result_budget(
-        self,
-        config: ContextGovernanceConfig,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        updated = messages
-        for idx, message in enumerate(messages):
-            if message.get("role") != "tool":
-                continue
-            normalized = self.normalize_tool_result(
-                config,
-                str(message.get("name") or "tool"),
-                message.get("content"),
-            )
-            if normalized != message.get("content"):
-                if updated is messages:
-                    updated = [dict(m) for m in messages]
-                updated[idx]["content"] = normalized
         return updated

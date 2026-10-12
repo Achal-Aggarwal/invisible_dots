@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import PurePosixPath
 from typing import Any, TypeVar
 
-from nanobot.agent.tools._search_content import ContentPage, MatchTooLargeError, SourceLine
+from nanobot.agent.tools._search_content import ContentPage, SourceLine
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
 
@@ -128,24 +128,8 @@ def _paginate(items: list[T], limit: int | None, offset: int) -> tuple[list[T], 
     return sliced, truncated
 
 
-def _text_page(
-    items: list[str], limit: int | None, offset: int, max_chars: int,
-) -> tuple[list[str], bool]:
-    page, truncated = _paginate(items, limit, offset)
-    size = 0
-    for index, item in enumerate(page):
-        size += len(item) + (1 if index else 0)
-        if size > max_chars:
-            if index == 0:
-                raise ValueError("Search entry exceeds output budget; narrow the search path")
-            return page[:index], True
-    return page, truncated
-
-
 def _pagination_note(limit: int | None, offset: int, truncated: bool) -> str | None:
     if truncated:
-        if limit is None:
-            return f"(pagination: offset={offset})"
         return f"(pagination: limit={limit}, offset={offset})"
     if offset > 0:
         return f"(pagination: offset={offset})"
@@ -187,7 +171,6 @@ class _SearchTool(_FsTool):
     _IGNORE_DIR_PREFIX = ".verify-"
     _MAX_SCAN_PATHS = 500_000
     _MAX_SCAN_SECONDS = 30.0
-    _MAX_RESULT_CHARS = 12_000
     _STAT_BATCH = 200
 
     @classmethod
@@ -366,7 +349,7 @@ class FindFilesTool(_SearchTool):
                 matches.sort(key=lambda item: item[0])
 
             paths = [item[0] for item in matches]
-            paged, truncated = _text_page(paths, limit, offset, self._MAX_RESULT_CHARS)
+            paged, truncated = _paginate(paths, limit, offset)
             if not paged:
                 return "No files found"
 
@@ -424,7 +407,6 @@ class FindFilesTool(_SearchTool):
 class GrepTool(_SearchTool):
     """Search text file contents using a regex-like pattern."""
 
-    _MAX_RENDERED_LINE_CHARS = 2_000
     _MAX_FILE_BYTES = 2_000_000
     _MAX_EXPLICIT_FILE_BYTES = 100_000_000
 
@@ -579,7 +561,7 @@ class GrepTool(_SearchTool):
                 limit = max_results
             else:
                 limit = _DEFAULT_HEAD_LIMIT
-            content_page = ContentPage(limit, offset, self._MAX_RESULT_CHARS, self._MAX_RENDERED_LINE_CHARS)
+            content_page = ContentPage(limit, offset)
             skipped_binary = 0
             skipped_large = 0
             counts: dict[str, int] = {}
@@ -652,7 +634,7 @@ class GrepTool(_SearchTool):
                     [f"{name}: {counts[name]}" for name in ordered_files]
                     if output_mode == "count" else ordered_files
                 )
-                paged, truncated = _text_page(entries, limit, offset, self._MAX_RESULT_CHARS)
+                paged, truncated = _paginate(entries, limit, offset)
                 result = "\n".join(paged) if file_mtimes or counts else no_matches
                 if truncated:
                     notes.append(
@@ -672,8 +654,6 @@ class GrepTool(_SearchTool):
             if notes:
                 result += "\n\n" + "\n".join(notes)
             return result
-        except MatchTooLargeError as exc:
-            return ToolResult.error(f"Error: {exc}")
         except _SearchBudgetExceededError as exc:
             return self._budget_error("grep", exc)
         except PermissionError as e:

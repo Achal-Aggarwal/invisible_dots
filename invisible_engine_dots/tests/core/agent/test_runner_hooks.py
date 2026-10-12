@@ -9,7 +9,6 @@ import pytest
 from agent.runner_helpers import ScriptedTools, make_run_spec
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ToolCallRequest
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 @pytest.mark.asyncio
@@ -70,7 +69,6 @@ async def test_runner_calls_hooks_in_order():
         tools=tools,
         model="test-model",
         max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=RecordingHook(),
     ))
 
@@ -125,7 +123,6 @@ async def test_runner_passes_cache_read_tokens_to_hook_context():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=UsageHook(),
     ))
 
@@ -165,7 +162,6 @@ async def test_runner_estimates_usage_when_provider_omits_usage(monkeypatch):
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=UsageHook(),
     ))
 
@@ -220,7 +216,6 @@ async def test_runner_calls_run_level_hooks_on_success():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=RunHook(),
     ))
 
@@ -280,7 +275,6 @@ async def test_runner_run_level_context_is_detached_snapshot():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=MutatingRunHook(),
     ))
 
@@ -326,7 +320,6 @@ async def test_runner_calls_on_error_for_model_error_result():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=ErrorHook(),
     ))
 
@@ -380,7 +373,6 @@ async def test_runner_calls_on_error_and_finally_for_unhandled_exception():
             tools=tools,
             model="test-model",
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=ExceptionHook(),
         ))
 
@@ -416,7 +408,6 @@ async def test_runner_preserves_original_exception_when_finally_hook_fails():
             tools=tools,
             model="test-model",
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=BadFinallyHook(),
         ))
 
@@ -463,7 +454,6 @@ async def test_runner_does_not_report_cancellation_as_error():
             tools=tools,
             model="test-model",
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=CancellationHook(),
         ))
 
@@ -500,6 +490,5 @@ async def test_runner_preserves_cancellation_when_finally_hook_fails():
             tools=tools,
             model="test-model",
             max_iterations=1,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=BadFinallyHook(),
         ))

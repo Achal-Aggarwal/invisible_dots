@@ -112,7 +112,6 @@ def _is_blocked_device(path: str) -> bool:
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
 
-    _MAX_CHARS = 128_000
     _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
     _DEFAULT_LIMIT = 2000
 
@@ -206,28 +205,6 @@ class ReadFileTool(_FsTool):
             end = min(start + (limit or self._DEFAULT_LIMIT), total)
             numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
             result = "\n".join(numbered)
-            line_truncated = False
-
-            if len(result) > self._MAX_CHARS:
-                trimmed: list[str] = []
-                chars = 0
-                for line in numbered:
-                    extra = len(line) + (1 if trimmed else 0)
-                    if chars + extra > self._MAX_CHARS:
-                        if not trimmed:
-                            trimmed.append(line[: self._MAX_CHARS])
-                            line_truncated = True
-                        break
-                    trimmed.append(line)
-                    chars += extra
-                end = start + len(trimmed)
-                result = "\n".join(trimmed)
-
-            if line_truncated:
-                result += (
-                    f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
-                    "Use exec with a targeted command to inspect the omitted content.)"
-                )
             if end < total:
                 result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
             else:

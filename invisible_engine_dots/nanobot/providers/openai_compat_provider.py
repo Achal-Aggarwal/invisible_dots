@@ -198,9 +198,6 @@ class OpenAICompatProvider(LLMProvider):
         # to create (~700 ms on Windows). Defer until first use.
         self._client: AsyncOpenAIType | None = None
         self._client_lock = asyncio.Lock()
-        # The limits of every model the endpoint lists, read once (GET /models) when a request first needs them.
-        self._model_limits: dict[str, ModelLimits] | None = None
-        self._model_limits_lock = asyncio.Lock()
         # What the endpoint counted of the prompts it took, which sizes the next requests (prompt_count.py).
         self._prompt_counts = PromptCounts()
 
@@ -842,28 +839,36 @@ class OpenAICompatProvider(LLMProvider):
     # ------------------------------------------------------------------
 
     async def model_limits(self, model: str) -> ModelLimits:
-        """The limits the endpoint publishes for `model` (``GET /models``), read once per provider.
+        """The limits `model` has now (``GET /models/{model}/endpoints``), read again on every call.
 
-        OpenRouter gives each model the context window and the longest answer of the provider it routes to by
-        default (``top_provider``); a model with none published there (a router) has unknown limits. A model the
-        endpoint does not list is an error: a request for it would fail too.
+        Read each time and not kept: an engine runs for weeks, and OpenRouter adds providers to a model and changes
+        their windows meanwhile. Of the providers serving the model (a negative status is one that is down), the
+        widest window and, at that window, the longest answer are the model's: the request is sent with that
+        answer as its limit, and OpenRouter routes only to providers that can give it. A router choosing the model
+        per request has no providers listed, so its limits are unknown. A model OpenRouter does not know is an
+        error: a request for it would fail too.
         """
-        async with self._model_limits_lock:
-            if self._model_limits is None:
-                client = await self._ensure_client()
-                listed: dict[str, ModelLimits] = {}
-                async for item in client.models.list():
-                    top = (item.model_extra or {}).get("top_provider") or {}
-                    context, answer = top.get("context_length"), top.get("max_completion_tokens")
-                    listed[item.id] = ModelLimits(
-                        context_tokens=context if isinstance(context, int) and context > 0 else None,
-                        answer_tokens=answer if isinstance(answer, int) and answer > 0 else None,
-                    )
-                self._model_limits = listed
-        found = self._model_limits.get(model)
-        if found is None:
-            raise LookupError(f"{self.provider_name} does not list the model {model}")
-        return found
+        client = await self._ensure_client()
+        try:
+            listing = cast(dict[str, Any], await client.get(f"/models/{model}/endpoints", cast_to=object))
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                raise LookupError(f"{self.provider_name} does not list the model {model}") from exc
+            raise
+        endpoints = [
+            endpoint for endpoint in (listing.get("data") or {}).get("endpoints") or []
+            if isinstance(endpoint.get("context_length"), int) and endpoint["context_length"] > 0
+        ]
+        serving = [endpoint for endpoint in endpoints if (endpoint.get("status") or 0) >= 0] or endpoints
+        if not serving:
+            return ModelLimits()
+
+        def answer_of(endpoint: dict[str, Any]) -> int | None:
+            answer = endpoint.get("max_completion_tokens")
+            return answer if isinstance(answer, int) and answer > 0 else None
+
+        widest = max(serving, key=lambda endpoint: (endpoint["context_length"], answer_of(endpoint) or 0))
+        return ModelLimits(context_tokens=widest["context_length"], answer_tokens=answer_of(widest))
 
     async def chat_stream(
         self,

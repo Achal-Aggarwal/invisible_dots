@@ -12,10 +12,6 @@ from dataclasses import dataclass
 from nanobot.dots.permissions import offered_mcp_servers, offered_tools
 from nanobot.dots.protocol import MODEL_ROLES, DotRuntimeConfig
 
-# Longest result of one tool call that goes back to the model, in characters.
-MAX_TOOL_RESULT_CHARS = 12000
-
-
 @dataclass(frozen=True)
 class EngineSettings:
     model_id: str
@@ -32,7 +28,6 @@ class EngineSettings:
     max_iterations: int
     # What a task, or the chat between two answers, may spend on the model, in USD (see nanobot.dots.spend).
     max_cost_usd: float
-    max_tool_result_chars: int
     workspace: str
     # The system prompt section that says whose Dot this is and what it is for.
     dot_prompt: str
@@ -55,7 +50,6 @@ def project(config: DotRuntimeConfig, *, workspace: str, openrouter_base_url: st
         mcp_servers=tuple(offered_mcp_servers(config.mcp_servers, config.permissions)),
         max_iterations=config.limits.max_steps_per_task,
         max_cost_usd=config.limits.max_cost_per_task_usd,
-        max_tool_result_chars=MAX_TOOL_RESULT_CHARS,
         workspace=workspace,
         dot_prompt=dot_prompt_section(config),
     )

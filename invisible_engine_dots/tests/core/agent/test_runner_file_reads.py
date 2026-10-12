@@ -45,7 +45,7 @@ async def _read(tools, call_id, history=None, **kwargs):
     ]
     result = await AgentRunner().run(make_run_spec(
         provider, model="test-model", tools=tools, initial_messages=initial,
-        max_iterations=2, max_tool_result_chars=128_000, **kwargs,
+        max_iterations=2, **kwargs,
     ))
     observation = next(
         message["content"] for message in result.messages

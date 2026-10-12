@@ -11,7 +11,6 @@ from agent.runner_helpers import ScriptedTools, make_run_spec
 from nanobot.agent.context import TranscriptInput
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
-_MAX_TOOL_RESULT_CHARS = 16_000
 
 
 def _make_injection_callback(queue: asyncio.Queue):
@@ -35,7 +34,7 @@ async def test_drain_injections_returns_empty_when_no_callback():
     tools.get_definitions.return_value = []
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=None,
     )
     result = await runner._drain_injections(spec)
@@ -63,7 +62,7 @@ async def test_drain_injections_extracts_content_from_inbound_messages():
 
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -93,7 +92,7 @@ async def test_drain_injections_keeps_entire_callback_snapshot():
 
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -125,7 +124,7 @@ async def test_drain_injections_skips_empty_content():
 
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -158,7 +157,7 @@ async def test_drain_injections_filters_empty_dict_payloads():
 
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -189,7 +188,7 @@ async def test_drain_injections_skips_objects_with_none_content():
 
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -211,7 +210,7 @@ async def test_drain_injections_handles_callback_exception():
 
     spec = make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "start"}], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        max_iterations=1, 
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -259,7 +258,6 @@ async def test_checkpoint1_injects_after_tool_execution():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -305,7 +303,6 @@ async def test_checkpoint2_injects_after_final_response():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -353,7 +350,6 @@ async def test_injected_followup_starts_new_length_recovery_chain():
         tools=tools,
         model="test-model",
         max_iterations=8,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -387,7 +383,6 @@ async def test_truncated_answer_followup_requires_remaining_iteration(max_iterat
         tools=tools,
         model="test-model",
         max_iterations=max_iterations,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=_make_injection_callback(queue),
     ))
 
@@ -442,7 +437,6 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -503,7 +497,6 @@ async def test_model_request_merges_injected_user_messages_without_losing_media(
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -566,7 +559,6 @@ async def test_injection_cycles_are_not_stopped_by_an_arbitrary_cap():
         tools=tools,
         model="test-model",
         max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -594,7 +586,6 @@ async def test_no_injections_flag_is_false_by_default():
         tools=tools,
         model="test-model",
         max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.had_injections is False
@@ -642,7 +633,6 @@ async def test_drain_injections_after_recoverable_tool_error():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -714,7 +704,6 @@ async def test_drain_injections_on_llm_error():
         tools=tools,
         model="test-model",
         max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -771,7 +760,6 @@ async def test_drain_injections_on_empty_final_response():
         tools=tools,
         model="test-model",
         max_iterations=10,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 
@@ -824,7 +812,6 @@ async def test_max_iterations_keeps_late_injection_queued():
         tools=tools,
         model="test-model",
         max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
         hook=InjectAfterLastIterationHook(),
     ))
@@ -877,7 +864,6 @@ async def test_error_path_is_not_stopped_by_an_arbitrary_injection_cap():
         tools=tools,
         model="test-model",
         max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
     ))
 

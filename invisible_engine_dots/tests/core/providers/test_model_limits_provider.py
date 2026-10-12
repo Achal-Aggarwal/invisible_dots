@@ -1,9 +1,10 @@
-"""The OpenAI-compatible provider reads each model's limits from the endpoint's list of models (OpenRouter's)."""
+"""The OpenAI-compatible provider reads a model's limits from the providers OpenRouter lists for it, on every call."""
 
 from __future__ import annotations
 
 import socket
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 from aiohttp import web
@@ -11,28 +12,44 @@ from aiohttp import web
 from nanobot.providers.base import ModelLimits
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
-MODELS = [
-    {"id": "z-ai/glm-5.3-flash", "context_length": 1_048_576, "top_provider": {"context_length": 1_048_575, "max_completion_tokens": 943_717}},
-    {"id": "openai/gpt-5-mini", "context_length": 400_000, "top_provider": {"context_length": 400_000, "max_completion_tokens": 128_000}},
-    # A router chooses the model per request: OpenRouter publishes no limits for it.
-    {"id": "openrouter/auto", "context_length": 2_000_000, "top_provider": {"context_length": None, "max_completion_tokens": None}},
-]
+
+def endpoint(provider: str, context: int | None, answer: int | None, status: int = 0) -> dict[str, Any]:
+    return {"provider_name": provider, "context_length": context, "max_completion_tokens": answer, "status": status}
 
 
-class ModelsEndpoint:
+# As OpenRouter answered GET /models/z-ai/glm-5.3-flash/endpoints on 2026-10-12, a few of its 32 providers.
+ENDPOINTS: dict[str, list[dict[str, Any]]] = {
+    "z-ai/glm-5.3-flash": [
+        endpoint("Reka", 262_144, 235_929),
+        endpoint("Z.AI", 1_048_576, 131_072),
+        endpoint("Fireworks", 1_048_576, 943_718),
+        endpoint("Together", 1_048_575, 943_717),
+        # A provider that is down does not count, however wide its window.
+        endpoint("SiliconFlow", 2_000_000, 262_144, status=-5),
+    ],
+    "apodex/apodex-1.1-mini:free": [endpoint("Novita", 262_144, 235_929)],
+    # A router chooses the model per request: OpenRouter lists no provider for it.
+    "openrouter/auto": [],
+}
+
+
+class Models:
     def __init__(self) -> None:
         self.reads = 0
 
-    async def models(self, request: web.Request) -> web.Response:
+    async def endpoints(self, request: web.Request) -> web.Response:
         self.reads += 1
-        return web.json_response({"data": MODELS})
+        model = request.match_info["model"]
+        if model not in ENDPOINTS:
+            return web.json_response({"error": {"message": "Not Found", "code": 404}}, status=404)
+        return web.json_response({"data": {"id": model, "endpoints": ENDPOINTS[model]}})
 
 
 @pytest.fixture
-async def served() -> AsyncIterator[tuple[OpenAICompatProvider, ModelsEndpoint]]:
-    endpoint = ModelsEndpoint()
+async def served() -> AsyncIterator[tuple[OpenAICompatProvider, Models]]:
+    models = Models()
     app = web.Application()
-    app.router.add_get("/api/v1/models", endpoint.models)
+    app.router.add_get("/api/v1/models/{model:.+}/endpoints", models.endpoints)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     with socket.socket() as probe:
@@ -41,18 +58,32 @@ async def served() -> AsyncIterator[tuple[OpenAICompatProvider, ModelsEndpoint]]
     await web.TCPSite(runner, "127.0.0.1", port).start()
     provider = OpenAICompatProvider(api_key="sk-or-test", api_base=f"http://127.0.0.1:{port}/api/v1", provider_name="openrouter")
     try:
-        yield provider, endpoint
+        yield provider, models
     finally:
         await runner.cleanup()
 
 
-async def test_each_model_has_the_window_and_the_longest_answer_of_its_default_provider(served) -> None:
-    provider, endpoint = served
+async def test_a_model_has_the_widest_window_of_the_providers_serving_it_and_the_longest_answer_at_that_window(
+    served,
+) -> None:
+    provider, _ = served
 
-    assert await provider.model_limits("z-ai/glm-5.3-flash") == ModelLimits(context_tokens=1_048_575, answer_tokens=943_717)
-    assert await provider.model_limits("openai/gpt-5-mini") == ModelLimits(context_tokens=400_000, answer_tokens=128_000)
-    # Read once for every model.
-    assert endpoint.reads == 1
+    assert await provider.model_limits("z-ai/glm-5.3-flash") == ModelLimits(context_tokens=1_048_576, answer_tokens=943_718)
+    assert await provider.model_limits("apodex/apodex-1.1-mini:free") == ModelLimits(
+        context_tokens=262_144, answer_tokens=235_929
+    )
+
+
+async def test_the_limits_are_read_again_on_every_call_so_a_change_at_openrouter_is_seen(served) -> None:
+    provider, models = served
+
+    assert (await provider.model_limits("apodex/apodex-1.1-mini:free")).context_tokens == 262_144
+    ENDPOINTS["apodex/apodex-1.1-mini:free"].append(endpoint("Fireworks", 524_288, 131_072))
+    try:
+        assert (await provider.model_limits("apodex/apodex-1.1-mini:free")).context_tokens == 524_288
+    finally:
+        ENDPOINTS["apodex/apodex-1.1-mini:free"].pop()
+    assert models.reads == 2
 
 
 async def test_a_router_has_unknown_limits(served) -> None:
@@ -61,7 +92,7 @@ async def test_a_router_has_unknown_limits(served) -> None:
     assert await provider.model_limits("openrouter/auto") == ModelLimits()
 
 
-async def test_a_model_the_endpoint_does_not_list_is_an_error(served) -> None:
+async def test_a_model_openrouter_does_not_know_is_an_error(served) -> None:
     provider, _ = served
 
     with pytest.raises(LookupError, match="does not list the model no/such-model"):

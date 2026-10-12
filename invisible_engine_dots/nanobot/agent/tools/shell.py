@@ -12,9 +12,7 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import current_request_session_key
 from nanobot.agent.tools.exec_session import (
-    DEFAULT_MAX_OUTPUT_CHARS,
     DEFAULT_YIELD_MS,
-    MAX_OUTPUT_CHARS,
     MAX_YIELD_MS,
     ExecSessionManager,
     clamp_session_int,
@@ -60,18 +58,6 @@ def _reap_pid(pid: int) -> None:
             maximum=MAX_YIELD_MS,
             nullable=True,
         ),
-        max_output_chars=IntegerSchema(
-            description="Session output limit in characters (default 10000, max 50000).",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
-            nullable=True,
-        ),
-        max_output_tokens=IntegerSchema(
-            description="Compatibility alias for max_output_chars.",
-            minimum=1000,
-            maximum=MAX_OUTPUT_CHARS,
-            nullable=True,
-        ),
         tty=BooleanSchema(
             description=(
                 "Run on a pseudo-terminal, for programs that ask questions or need a terminal "
@@ -93,18 +79,15 @@ class ExecTool(Tool):
     """
 
     _MAX_TIMEOUT = 600
-    _MAX_OUTPUT = 10_000
 
     def __init__(
         self,
         computer: Computer,
         timeout: int = 60,
-        max_output_chars: int | None = None,
         session_manager: ExecSessionManager | None = None,
     ) -> None:
         self.computer = computer
         self.timeout = timeout
-        self.max_output_chars = max_output_chars or self._MAX_OUTPUT
         self._session_manager = session_manager or ExecSessionManager()
 
     @property
@@ -180,8 +163,6 @@ class ExecTool(Tool):
         workdir: str | None = None,
         timeout: int | None = None,
         yield_time_ms: int | None = None,
-        max_output_chars: int | None = None,
-        max_output_tokens: int | None = None,
         tty: bool = False,
         **kwargs: Any,
     ) -> str:
@@ -189,8 +170,6 @@ class ExecTool(Tool):
         working_dir = working_dir or workdir
         if not command:
             return ToolResult.error("Error: Missing command. Provide command or cmd.")
-        if max_output_chars is None:
-            max_output_chars = max_output_tokens
 
         cwd = self.computer.resolve(working_dir or ".")
         effective_timeout = self._resolve_timeout(timeout)
@@ -198,7 +177,7 @@ class ExecTool(Tool):
         if yield_time_ms is not None or tty:
             # A terminal program is interactive: it always runs as a session that exec_session drives.
             return await self._execute_session(
-                command, cwd, effective_timeout, yield_time_ms, max_output_chars, tty
+                command, cwd, effective_timeout, yield_time_ms, tty
             )
 
         process: asyncio.subprocess.Process | None = None
@@ -231,19 +210,7 @@ class ExecTool(Tool):
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
             output_parts.append(f"\nExit code: {process.returncode}")
-            result = "\n".join(output_parts)
-
-            max_len = clamp_session_int(
-                max_output_chars, self.max_output_chars, 1000, MAX_OUTPUT_CHARS
-            )
-            if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
-            return result
+            return "\n".join(output_parts)
 
         except Exception as e:
             # Kill and reap the relay if it started but an unexpected error
@@ -258,7 +225,6 @@ class ExecTool(Tool):
         cwd: str,
         timeout: int | None,
         yield_time_ms: int | None,
-        max_output_chars: int | None,
         tty: bool,
     ) -> str:
         try:
@@ -270,12 +236,6 @@ class ExecTool(Tool):
                 yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
                 owner_session_key=current_request_session_key(),
                 tty=tty,
-                max_output_chars=clamp_session_int(
-                    max_output_chars,
-                    DEFAULT_MAX_OUTPUT_CHARS,
-                    1000,
-                    MAX_OUTPUT_CHARS,
-                ),
             )
             result = format_session_poll(session_id, poll)
             return ToolResult.error(result) if poll.timed_out else result

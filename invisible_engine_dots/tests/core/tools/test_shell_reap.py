@@ -171,11 +171,11 @@ async def test_execute_exception_after_success_does_not_raise_on_dead_process(tm
     with (
         patch.object(ExecTool, "_spawn", return_value=mock_proc),
         patch(KILLPG, side_effect=ProcessLookupError("no group")),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        # The safety-net reap after communicate() fails; the cleanup's reap succeeds.
         patch(
-            "nanobot.agent.tools.shell.clamp_session_int",
-            side_effect=RuntimeError("boom after exit"),
-        ),
+            "nanobot.agent.tools.shell._reap_pid",
+            side_effect=[RuntimeError("boom after exit"), None],
+        ) as reap,
     ):
         tool = ExecTool(LocalComputer(tmp_path))
         result = await tool.execute(command="echo out")
@@ -390,7 +390,7 @@ async def test_exec_session_poll_reaps_after_exit():
     )
     try:
         with patch("nanobot.agent.tools.shell._reap_pid") as reap:
-            poll = await session.poll(yield_time_ms=0, max_output_chars=1000)
+            poll = await session.poll(yield_time_ms=0)
         assert poll.done is True
         assert poll.exit_code == 0
         reap.assert_called_once_with(2002)

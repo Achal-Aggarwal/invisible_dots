@@ -188,8 +188,6 @@ body or the exception's message. The provider's own handling and the base class'
 
 Kept on purpose, with the reason, for the next cut to decide:
 
-- `_BoundedOutputBuffer.retained_chars`: the invariant that an unpolled session holds
-  at most its bound is asserted through it.
 - `AgentHook`'s lifecycle methods the Dot's hook does not override: they are exercised
   by upstream tests that pin their behavior, and none is reachable from the Dot.
 
@@ -211,7 +209,8 @@ Kept on purpose, with the reason, for the next cut to decide:
   `Tool.read_only`, `concurrency_safe` and `exclusive`); the calls of a response run one
   at a time, each decided by the gate before it runs.
 - the spill of a long tool result to a file (`maybe_persist_tool_result`, its buckets,
-  `AgentRunSpec.workspace`): a long result is cut to `max_tool_result_chars`.
+  `AgentRunSpec.workspace`): a result is cut only where the model's window ends,
+  once compaction did what it could (`ContextGovernor.fit_latest_round`).
 - agent/tools/mcp.py: a call that hit a connection error was repeated once after 1 s,
   so a call an HTTP server had already received could run twice; it is not repeated
   now. The reconnect machinery and `MCPServerConfig.enabled_tools` are gone:
