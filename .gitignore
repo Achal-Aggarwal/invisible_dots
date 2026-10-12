@@ -30,3 +30,6 @@ vitest-report.json
 # Editor and Python leftovers of the gates
 __pycache__/
 .venv/
+
+# The README animation's frames: docs/hero/build.mjs writes them on every run, from the pages and photos beside it
+/docs/hero/frames/
