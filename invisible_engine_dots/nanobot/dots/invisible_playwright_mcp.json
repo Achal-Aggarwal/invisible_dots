@@ -1,7 +1,7 @@
 {
  "//": "What invisible-playwright-mcp tells a model, at the version builder/mcp-requirements.lock pins, started as the engine starts it (INVISIBLE_MCP_HOST_MANAGED=1): its instructions and its tools/list as served, and the sentences the engine reads in its answers (the package's OPENED, NOT_OPEN and GONE, %s being the browser). Written by guest/image-builder/builder/capture-mcp-interface.py; capture it again when the lock changes that version.",
  "package": "invisible-playwright-mcp",
- "version": "0.71.2",
+ "version": "0.72.0",
  "instructions": "Drive the page the way a person would. Everything here goes\nthrough the real pointer and the real keyboard.\n\nTry things in this order. It matters, because a page can tell the difference.\n\n1. A named tool with a selector: browser_click, browser_type,\n   browser_select_option, browser_press_key, browser_upload_files.\n   browser_snapshot gives you the selector for each element - pass it\n   verbatim, it is built to be unambiguous.\n\n2. Coordinates. browser_snapshot reports `at: [x, y]` for every element it\n   lists, in viewport pixels. browser_click_at takes exactly those and moves the\n   pointer there. This is the rung for anything a selector does not describe: a\n   canvas, a slider, a map, a custom widget built out of divs.\n\n3. Your eyes. browser_take_screenshot, find the thing in the picture, then\n   browser_click_at on where it is. For what the snapshot does not list at all.\n\n4. browser_evaluate, last, to READ what none of the tools above can.\n\nbrowser_evaluate refuses the obvious ways to act on the page, and names the tool\nto use instead: assigning to value, checked or selected, or calling click(),\ndispatchEvent(), submit() or requestSubmit(). All of those skip the keyboard and\nthe pointer, so the event arrives with isTrusted false - the single clearest\nsignal that something other than a person is driving, and avoiding it is what\nthis browser is for. When you want that, rung 2 or rung 3 is what you actually\nwant.\n\nThat refusal is a guardrail on the obvious road, not a wall around the field.\nJavaScript has unlimited ways to say the same thing and this catches the ones\nworth catching, so DO NOT read a silent pass as permission: if you find a way to\nchange the page through browser_evaluate, that is the bug, and saying so in your\nanswer is worth more than using it.\n\nYou do not need script to read state back, either. The snapshot carries\n`checked` for a checkbox or radio and `value` for a select, alongside the text.\n\nA cookie or consent dialog covers the page until it is answered: a click on\nanything under it waits and fails. When browser_snapshot shows one, click one of\nits buttons first. A date field that is a calendar wants its days clicked, not\ntyped.\n\nIf you get to the bottom of the ladder and still cannot do the thing, say so in\nyour answer. A task reported as impossible is worth more than a task completed\nin a way that gets you blocked, and a number or a fact you could not read on the\npage is not one to give.\n\nReach a page through a link you have seen or an address you were given, not one\nyou remember: sites move their pages, and an address from memory often answers\n404. browser_snapshot lists a page's links with their URLs, and a site's own\nmenu and search reach what you cannot guess. From nothing, search: navigate to\nhttps://search.brave.com/search?q=<your words> and read the results with\nbrowser_snapshot, whose URLs are real. After a 404, the next address comes from\na page that loaded or from a search, not from memory.\n\nA browser drives ONE page, and there is no way to open, list, choose or close\nanother: browser_navigate opens the page and every other tool acts on it. Going\nsomewhere else and coming back is a navigation, not a second window: to go\nback, navigate to the address you came from, and to load a page again, navigate\nto its own address.",
  "browser": "main",
  "answers": {
@@ -109,7 +109,7 @@
   },
   {
    "name": "browser_navigate",
-   "description": "Go to a url in this browser's page, opening it if none exists.\n\n    Answers with the HTTP status the server gave and the url actually landed\n    on, which is not always the one asked for: a redirect to a login wall or a\n    regional domain shows up here. Read the status before trusting the page -\n    a 404 or a 403 still has a document, and reading it as content is the\n    mistake this reply exists to prevent.\n\n    wait_until is \"domcontentloaded\" by default, which returns as soon as the\n    markup is parsed. Use \"load\" when the page needs its images and stylesheets,\n    or \"networkidle\" for a single-page app that fetches its content after\n    load.",
+   "description": "Go to a url in this browser's page, opening it if none exists.\n\n    Answers with the HTTP status the server gave and the url actually landed\n    on, which is not always the one asked for: a redirect to a login wall or a\n    regional domain shows up here. Read the status before trusting the page -\n    a 404 or a 403 still has a document, and reading it as content is the\n    mistake this reply exists to prevent.\n\n    If the page you were on navigates itself at that moment (a redirect on a\n    timer), Firefox can follow it instead, and the answer is an error saying\n    \"interrupted by another navigation to\" a url. The browser is on that url,\n    and you can navigate again from there.\n\n    wait_until is \"domcontentloaded\" by default, which returns as soon as the\n    markup is parsed. Use \"load\" when the page needs its images and stylesheets,\n    or \"networkidle\" for a single-page app that fetches its content after\n    load.",
    "inputSchema": {
     "properties": {
      "url": {
@@ -137,18 +137,13 @@
   },
   {
    "name": "browser_read_text",
-   "description": "The visible text of an element, with the markup gone.\n\n    The cheapest way to read a page. Narrow the selector when you know where the\n    answer is; use browser_read_html instead when the structure matters, or\n    browser_snapshot when you need something to click.\n\n    Long text is cut at max_chars (6000 by default) and the cut is marked in\n    what comes back, so text that ends without that marker is the whole thing.",
+   "description": "The visible text of an element, with the markup gone, whole.\n\n    The cheapest way to read a page. Narrow the selector when you know where the\n    answer is; use browser_read_html instead when the structure matters, or\n    browser_snapshot when you need something to click.",
    "inputSchema": {
     "properties": {
      "selector": {
       "default": "body",
       "title": "Selector",
       "type": "string"
-     },
-     "max_chars": {
-      "default": 6000,
-      "title": "Max Chars",
-      "type": "integer"
      }
     },
     "title": "browser_read_textArguments",
@@ -165,13 +160,7 @@
    "name": "browser_snapshot",
    "description": "Title, url, and the interactive elements that are actually visible.\n\n    Each element carries a `selector` when one can reach it: pass that string to\n    browser_click or browser_type VERBATIM rather than writing your own. It is\n    built to match exactly ONE element, which the obvious selector often does\n    not, and the driver acts on the first match - so a caller aiming at the\n    third of five identical links would silently hit the first and be told it\n    succeeded.\n\n    Elements with no `selector` carry `at`, the centre coordinates, for\n    browser_click_at.\n\n    It lists what a caller can act on, and it is not the accessibility tree:\n    one country `<select>` would otherwise fill the answer with its options\n    before the form you were looking for appears.\n    ",
    "inputSchema": {
-    "properties": {
-     "max_chars": {
-      "default": 0,
-      "title": "Max Chars",
-      "type": "integer"
-     }
-    },
+    "properties": {},
     "title": "browser_snapshotArguments",
     "type": "object"
    },
