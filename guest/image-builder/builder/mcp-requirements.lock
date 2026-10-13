@@ -463,15 +463,15 @@ httpx2==2.13.1 \
 idna==3.20 \
     --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
     --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
-invisible-core==41.36.0 \
-    --hash=sha256:47306ffeb8ed9fa1dd9c9d7e6dc1e9fcf8a5e6518b7e21c953b4e00ed437621b \
-    --hash=sha256:beb7b942c3e7b3a240b7774ef8f5fbeee2c5566d785a19f306abcb65ba8e2be8
-invisible-playwright==0.35.0 \
-    --hash=sha256:03d116a1605e19c351bc6e51b246aa2b40331c9091f338b68a8e75ed2d83acf0 \
-    --hash=sha256:7721ae7d6ecf8afd9513720d82dfaaec1f8f3b975e64c2c5e0eed9095f5d4255
-invisible-playwright-mcp==0.72.1 \
-    --hash=sha256:cded8587f238f348dd77b97b5e179caa16a2077b861e7120db5f4c9d608377cc \
-    --hash=sha256:e1596ad62acab6116a9776e2e9762cb953f2ea1772f5f0d46e4ec7b1c47ae0eb
+invisible-core==45.39.0 \
+    --hash=sha256:5855e4debbe1937dd6924905723fb4c1e460e038e6045239abb63dd188584919 \
+    --hash=sha256:c53097e0aaea4aa157e44d6d8820458c9409921d21eb3ea84632144b3d89c7dd
+invisible-playwright==0.35.7 \
+    --hash=sha256:9bc56b5c4a9c7a8e2a94092e0b133d799a43da4cf97dfa0bef6b8e0ad355589d \
+    --hash=sha256:fe54800cc49095e5c1a7a8a7bed6c2feb717ea061cc7a2d66bf78b4607134702
+invisible-playwright-mcp==0.72.2 \
+    --hash=sha256:2e7bcb528454a04ed19ea3ccb53537076ee0b174d2cd13c5868e28bb70d28113 \
+    --hash=sha256:857d92272410fa2ff8a16d63a92443faee9cd9c25c84384f18a19582f71b43db
 jiter==0.17.0 \
     --hash=sha256:00b5a98df3e3a3e8cf7b619f4ac2f8bf975bbf3d95d02c5d17b8dbfe5c8b8245 \
     --hash=sha256:00d783a779c5664e16dbad5e3a3c3a75e128b07dd5f4765159658d9210a50ca5 \
