@@ -35,6 +35,13 @@ RUNTIME_ONLY = {
 }
 
 
+# Modules of the package another interpreter runs, with the distributions that interpreter has and the engine does
+# not: server_capture.py is run by the python of the installed invisible-playwright-mcp (server_interface.py).
+OTHER_INTERPRETER = {
+    "nanobot/dots/server_capture.py": {"invisible-playwright-mcp"},
+}
+
+
 def _normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -61,11 +68,14 @@ def _imported() -> dict[str, set[str]]:
                 tops = [node.module.split(".")[0]]
             else:
                 continue
+            module = path.relative_to(ENGINE_ROOT).as_posix()
             for top in tops:
                 if top in sys.stdlib_module_names or top == "nanobot":
                     continue
                 distribution = _normalize(IMPORT_TO_DISTRIBUTION.get(top, top))
-                found.setdefault(distribution, set()).add(path.relative_to(ENGINE_ROOT).as_posix())
+                if distribution in OTHER_INTERPRETER.get(module, set()):
+                    continue
+                found.setdefault(distribution, set()).add(module)
     return found
 
 

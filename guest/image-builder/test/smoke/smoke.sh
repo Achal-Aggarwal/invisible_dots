@@ -118,6 +118,9 @@ printf '%s\n' "$FAKE_MCP_DIR/fakes" "$FAKE_MCP_DIR/fakes/server_package" "$engin
 FAKE_MCP=$FAKE_ENV/bin/invisible-playwright-mcp
 printf '#!/bin/sh\nexec %s/bin/python -I -B -m invisible_playwright_mcp "$@"\n' "$FAKE_ENV" > "$FAKE_MCP"
 chmod 0755 "$FAKE_MCP"
+# A running stand-in, as pgrep -f finds it: the command line the wrapper execs. The engine's read of the server at
+# start runs the same module without -I -B, so it is never counted as a server of an identity.
+FAKE_PROCESS="$FAKE_ENV/bin/python -I -B -m invisible_playwright_mcp"
 # --- the stand-in for an MCP server the person declares: the engine's test fake of any server, run as dot the same way ---
 install -D -m 0644 "$ENGINE_TESTS/fakes/fake_tool_server.py" "$FAKE_MCP_DIR/fakes/fake_tool_server.py"
 FAKE_TOOLS=/usr/local/lib/smoke-fake/fake-tools
@@ -548,7 +551,7 @@ check "the host pushes the allow-everything config once more (204 204)" "[ \"\$(
 BROWSERS=/home/dot/browsers
 MCP_HOMES=/var/lib/invisible-dots/mcp   # the stand-ins' homes, outside /home/dot (architecture 4.2)
 rec() { echo "$MCP_HOMES/$1/record.jsonl"; }
-fakes_running() { pgrep -u dot -f fake_mcp_server.py | wc -l; }
+fakes_running() { pgrep -u dot -f "$FAKE_PROCESS" | wc -l; }
 wait_fakes() { # n: the stand-in's processes of dot number n within 10 s
   for _ in $(seq 1 50); do [ "$(fakes_running)" = "$1" ] && return 0; sleep 0.2; done
   return 1
@@ -585,7 +588,7 @@ check "no browser runs for a closed identity, and /health counts one identity, n
 
 check "the model launches the identity" "tool_turn 1 browser_identity_launch '{\"identity_id\":\"$ID1\"}'"
 check "browser.identity.launched names it" "launched $ID1"
-check "the MCP server runs as dot, one process, and none of it runs as dotengine" "[ \"\$(fakes_running)\" = 1 ] && ! pgrep -u dotengine -f fake_mcp_server.py >/dev/null"
+check "the MCP server runs as dot, one process, and none of it runs as dotengine" "[ \"\$(fakes_running)\" = 1 ] && ! pgrep -u dotengine -f \"\$FAKE_PROCESS\" >/dev/null"
 check "its environment has the profile, the display, the session id and its home, no self-repair of the library, no proxy, none of the engine's variables and no key; its working directory is the identity's" "mcp_env_ok $ID1 ''"
 check "browser_open was called with no argument (the server serves the identity's browser alone), once" "call_seen $ID1 browser_open '.args=={}' && [ \"\$(jq -s '[.[] | select(.kind==\"call\" and .name==\"browser_open\")] | length' $(rec $ID1))\" = 1 ]"
 check "/health counts one identity, one open" "health_is 1 1"
@@ -644,7 +647,7 @@ check "the parked delete did not run: the identity and its directory are there, 
 LASTD=$(grep '^id: ' "$STREAM" | tail -1 | sed 's/^id: //')
 check "three servers run as dot before the kill" "[ \"\$(fakes_running)\" = 3 ]"
 pkill -9 -u dotengine
-check "kill -9 of the engine ended every MCP server within 10 s (dot-agentd ended their groups)" "gone_within 10 fake_mcp_server.py"
+check "kill -9 of the engine ended every MCP server within 10 s (dot-agentd ended their groups)" "gone_within 10 \"\$FAKE_PROCESS\""
 start_engine
 check "the restarted engine answers /health (delete pending)" "wait_health && wait_key"
 check "the delete is still pending after kill -9" "st | jq -e --arg id \"$APD\" '.pending_approval==\$id' >/dev/null"
@@ -682,7 +685,7 @@ check "closing a closed identity answers 204 and emits nothing; an unknown one i
 check "the model launches it again, so the idle kill below meets an open identity" "tool_turn 12 browser_identity_launch '{\"identity_id\":\"$ID5\"}' && wait_fakes 1 && health_is 4 1"
 # A server that dies while nothing calls it (its relay ends with it): the engine hears of it when it happens.
 CLOSED_BEFORE=$(closed_total $ID5)
-check "a server killed while idle closes its identity at once, with no call: closed is emitted once and /health counts none open" "pkill -9 -u dot -f fake_mcp_server.py; wait_fakes 0 && wait_closed_total $ID5 $((CLOSED_BEFORE + 1)) && health_is 4 0 && [ \"\$(api $A/browser-identities/$ID5 | jq -r .status)\" = available ]"
+check "a server killed while idle closes its identity at once, with no call: closed is emitted once and /health counts none open" "pkill -9 -u dot -f \"\$FAKE_PROCESS\"; wait_fakes 0 && wait_closed_total $ID5 $((CLOSED_BEFORE + 1)) && health_is 4 0 && [ \"\$(api $A/browser-identities/$ID5 | jq -r .status)\" = available ]"
 check "the model launches it once more, so the delete below meets an open identity" "tool_turn 13 browser_identity_launch '{\"identity_id\":\"$ID5\"}' && wait_fakes 1 && health_is 4 1"
 check "DELETE /browser-identities/:id of the open identity answers 204" "[ \"\$(api -o /dev/null -w '%{http_code}' -X DELETE $A/browser-identities/$ID5)\" = 204 ]"
 check "its browser was closed, then it was deleted: closed, then deleted" "wait_event $STREAM '.type==\"browser.identity.deleted\" and .data.identity_id==\"$ID5\"' && grep '^data: ' $STREAM | sed 's/^data: //' | jq -s -e '[.[] | select(.data.identity_id==\"$ID5\" and (.type==\"browser.identity.closed\" or .type==\"browser.identity.deleted\")) | .type] | .[-2:] == [\"browser.identity.closed\",\"browser.identity.deleted\"]' >/dev/null"
