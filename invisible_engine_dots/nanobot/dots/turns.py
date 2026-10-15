@@ -323,9 +323,7 @@ class TurnRunner:
             now=datetime.now().astimezone(),
             skills=await all_skills(self._computer),
             # The browser server's instructions, as an MCP host carries them, when the turn offers its tools.
-            browser_instructions=browser_tools.INSTRUCTIONS
-            if any(name in browser_tools.SERVER_TOOLS for name in settings.offered_tools)
-            else "",
+            browser_instructions=browser_tools.server_instructions(tools),
             # The declared MCP servers whose tools may be offered: their instructions, or why they are not connected.
             mcp_servers=self._mcp.prompt_servers(settings.mcp_servers),
         )

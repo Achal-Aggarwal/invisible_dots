@@ -2,14 +2,20 @@ name: golden image
 
 # Builds the golden image once, here, and publishes it as the release golden-<inputs digest>, which
 # `invisible-dots image build` downloads instead of building (guest/image-builder/src/prebuilt.ts). The digest is the
-# one every host computes from the pinned inputs, so a host only ever takes the image of its own inputs. A digest that
-# already has its release is not built again.
+# one every host computes from the pinned inputs and the newest release of the Dot's browser on the package index
+# (browser-release.ts), so a host only ever takes the image of its own inputs. A digest that already has its release
+# is not built again.
+#
+# The schedule is what makes a new release of the browser reach the hosts as a prebuilt image: no file of this
+# repository changes when one is published, and the next run here finds a new digest and builds it.
 on:
   push:
     branches: [main]
     paths:
       - guest/image-builder/**
       - virtualization/images/**
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -67,4 +73,4 @@ jobs:
           fi
           gh release create "$tag" "$RUNNER_TEMP"/release/* \
             --title "Golden image $tag" \
-            --notes "The golden image of the inputs ${tag#golden-}, built by the golden image workflow from ${GITHUB_SHA}. invisible-dots image build downloads it when a checkout's inputs have this digest. It holds Ubuntu 24.04 and the software guest/image-builder/pins.json and the locks name, each under its own license (THIRD_PARTY_NOTICES.md)."
+            --notes "The golden image of the inputs ${tag#golden-}, built by the golden image workflow from ${GITHUB_SHA}. invisible-dots image build downloads it when a checkout's inputs have this digest. It holds Ubuntu 24.04, the software guest/image-builder/pins.json and the engine's lock name, and the release of invisible-playwright-mcp its manifest records, each under its own license (THIRD_PARTY_NOTICES.md)."

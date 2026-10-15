@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 from fakes.browser_manager import mcp_home
-from fakes.fake_mcp_server import install_fake_mcp, read_record, write_control
+from fakes.fake_mcp_server import install_fake_mcp, read_record, server_interface, write_control
 from fakes.local_computer import LocalComputer
 
 from nanobot.agent.tools.base import ToolResult
@@ -56,6 +56,7 @@ class Env:
             "store": self.store,
             "computer": self.computer,
             "mcp_command": str(self.mcp_bin),
+            "interface": server_interface(),
             "max_open": 3,
             "max_identities": 20,
             "browsers_dir": str(self.browsers),
@@ -601,9 +602,10 @@ NOT_OPEN_SENTENCE = "the main browser is not open. Call browser_open to open it.
         ("the support browser is gone: it closed or crashed.", False),
     ],
 )
-def test_only_the_librarys_whole_sentence_is_a_lost_browser(text: str, lost: bool) -> None:
-    assert BrowserManager._is_browser_lost(ToolResult.error(text)) is lost
-    assert BrowserManager._is_browser_lost(text) is False
+def test_only_the_librarys_whole_sentence_is_a_lost_browser(env: Env, text: str, lost: bool) -> None:
+    manager = env.manager()
+    assert manager._is_browser_lost(ToolResult.error(text)) is lost
+    assert manager._is_browser_lost(text) is False
 
 
 async def test_the_launch_that_follows_a_lost_browser_makes_a_new_server_and_the_identity_works_again(env: Env) -> None:

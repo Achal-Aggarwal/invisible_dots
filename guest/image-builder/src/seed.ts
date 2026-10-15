@@ -7,24 +7,23 @@
  */
 import type { IsoEntry } from "@invisible-dots/iso";
 import { downloadFileName, type GuestPins } from "./pins.js";
-import type { PythonLock } from "./python-lock.js";
+import type { BrowserRelease } from "./browser-release.js";
 
-/** The lock's name on the builder seed, where provision.sh reads it. */
-export const SEED_PYTHON_LOCK = "mcp-requirements.lock";
 /** The engine's lock and the script that builds its Python environment from it, on the builder seed. */
 export const SEED_ENGINE_LOCK = "engine-requirements.lock";
 export const SEED_ENGINE_BUILD = "build-engine-env.sh";
-/** The script that builds the Dot's browser from the MCP lock, on the builder seed. */
+/** The script that builds the Dot's browser, on the builder seed. */
 export const SEED_BROWSER_BUILD = "build-browser-env.sh";
+/** The browsers build-browser-env.sh refuses, beside it on the seed, where it reads them. */
+export const SEED_OTHER_BROWSERS = "other-browsers.txt";
 
 export interface BuilderSeedInput {
   version: string;
   pins: GuestPins;
   userData: Uint8Array;
   provision: Uint8Array;
-  /** builder/mcp-requirements.lock, as read, and what it pins. */
-  pythonLock: Uint8Array;
-  python: PythonLock;
+  /** The release of the Dot's browser to install (browser-release.ts). */
+  browser: BrowserRelease;
   /** Host path of the verified uv tarball, streamed into the image. */
   uvTarball: string;
   /** The verified hev-socks5-tunnel binary (pins.tunnel). */
@@ -32,8 +31,9 @@ export interface BuilderSeedInput {
   /** builder/engine-requirements.lock and builder/build-engine-env.sh, as read. */
   engineLock: Uint8Array;
   engineBuild: Uint8Array;
-  /** builder/build-browser-env.sh, as read. */
+  /** builder/build-browser-env.sh and builder/other-browsers.txt, as read. */
   browserBuild: Uint8Array;
+  otherBrowsers: Uint8Array;
 }
 
 /**
@@ -42,15 +42,15 @@ export interface BuilderSeedInput {
  * quotes are only a second guard; the check below keeps it that way if a
  * caller builds GuestPins by hand.
  */
-export function pinsEnv(pins: GuestPins, python: PythonLock): string {
+export function pinsEnv(pins: GuestPins, browser: BrowserRelease): string {
   const values: Array<[string, string]> = [
     ["UV_VERSION", pins.uv.version],
     ["UV_TARBALL", downloadFileName(pins.uv)],
     ["TUNNEL_VERSION", pins.tunnel.version],
     ["TUNNEL_BINARY", downloadFileName(pins.tunnel)],
-    ["MCP_VERSION", python.mcpVersion],
-    ["PLAYWRIGHT_VERSION", python.playwrightVersion],
-    ["PYTHON_LOCK", SEED_PYTHON_LOCK],
+    ["MCP_VERSION", browser.mcp],
+    ["PLAYWRIGHT_VERSION", browser.playwright],
+    ["CORE_VERSION", browser.core],
     ["ENGINE_LOCK", SEED_ENGINE_LOCK],
     ["ENGINE_BUILD", SEED_ENGINE_BUILD],
     ["BROWSER_BUILD", SEED_BROWSER_BUILD],
@@ -75,12 +75,12 @@ export function builderSeedEntries(input: BuilderSeedInput): IsoEntry[] {
     { path: "user-data", data: input.userData },
     { path: "meta-data", data: builderMetaData(input.version) },
     { path: "provision.sh", data: input.provision },
-    { path: "pins.env", data: pinsEnv(input.pins, input.python) },
-    { path: SEED_PYTHON_LOCK, data: input.pythonLock },
+    { path: "pins.env", data: pinsEnv(input.pins, input.browser) },
     { path: downloadFileName(input.pins.uv), file: input.uvTarball },
     { path: downloadFileName(input.pins.tunnel), file: input.tunnelBinary },
     { path: SEED_ENGINE_LOCK, data: input.engineLock },
     { path: SEED_ENGINE_BUILD, data: input.engineBuild },
     { path: SEED_BROWSER_BUILD, data: input.browserBuild },
+    { path: SEED_OTHER_BROWSERS, data: input.otherBrowsers },
   ];
 }

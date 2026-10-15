@@ -2,13 +2,14 @@
 
 Each tool is run the way the engine runs one (`run_tool`: registry, cast, validation, error wrapping). The
 MCP server is `fake_mcp_server.py`, which serves invisible-playwright-mcp's own tools as the engine captured them
-(`nanobot/dots/invisible_playwright_mcp.json`) and records every call it gets, so what a tool sends is read off
+(`tests/fakes/invisible_playwright_mcp.json`) and records every call it gets, so what a tool sends is read off
 the server and not off the tool.
 """
 
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import re
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -18,7 +19,7 @@ from typing import Any
 import pytest
 from fakes.browser_manager import make_browser_manager, mcp_home
 from fakes.dot_config import ALLOW_ALL
-from fakes.fake_mcp_server import PNG, read_record, write_control
+from fakes.fake_mcp_server import PNG, read_record, server_interface, write_control
 from fakes.local_computer import LocalComputer
 from fakes.run_tool import run_tool
 from fakes.scripted_provider import call, calls, says
@@ -29,10 +30,11 @@ from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.cron.service import CronService
 from nanobot.dots import store as s
-from nanobot.dots.browser import BrowserManager
-from nanobot.dots.browser_tools import SERVER_TOOLS
+from nanobot.dots.browser import BrowserIdentityError, BrowserManager
+from nanobot.dots.browser_tools import server_instructions
 from nanobot.dots.images import IMAGES_HEADER, TurnImages, bind_turn_images, reset_turn_images
-from nanobot.dots.permissions import TOOL_PERMISSIONS, ToolDeps, build_registry
+from nanobot.dots.permissions import TOOL_PERMISSIONS, UNSERVED, ToolDeps, build_registry, tool_table
+from nanobot.dots.server_interface import ServerInterfaceError
 from nanobot.dots.store import DotStore
 from nanobot.dots.turns import OpeningMessage, TurnUnit
 
@@ -135,6 +137,7 @@ PAGE_CALLS: list[tuple[str, dict[str, Any]]] = [
     ("browser_select_option", {"selector": "#c", "value": "it"}),
     ("browser_upload_files", {"selector": "#file", "paths": ["/home/dot/workspace/cv.pdf"]}),
 ]
+SERVER_TOOLS = server_interface().tools
 PAGE_TOOLS = {name for name in TOOL_PERMISSIONS if name in SERVER_TOOLS}
 
 
@@ -149,6 +152,44 @@ async def test_a_page_tool_calls_the_server_tool_of_its_name_with_the_arguments_
     assert not isinstance(result, ToolResult) or not result.is_error, result
     # The server serves the identity's browser alone: nothing is added, and the identity is not passed on.
     assert env.page_calls(identity_id) == [(tool, arguments)]
+
+
+def _registry(tmp_path: Path, store: DotStore, interface: Any) -> tuple[BrowserManager, ToolRegistry]:
+    (tmp_path / "computer").mkdir()
+    computer = LocalComputer(tmp_path / "computer")
+    manager = make_browser_manager(tmp_path, store, computer, interface=interface)
+    deps = ToolDeps(computer, ExecSessionManager(), CronService(tmp_path / "cron" / "jobs.json"), manager, store)
+    return manager, build_registry(deps)
+
+
+async def test_with_no_readable_server_no_page_tool_is_offered_and_a_launch_says_why(
+    tmp_path: Path, dot_store: DotStore
+) -> None:
+    """A computer whose browser server could not be read (an image without one, a broken install) has the identity
+    tools and no page tool, and a launch answers with why instead of starting a process that cannot be driven."""
+    manager, registry = _registry(tmp_path, dot_store, ServerInterfaceError("reading invisible-playwright-mcp exited 127"))
+
+    assert not [name for name in PAGE_TOOLS if registry.has(name)]
+    assert server_instructions(registry.view(list(TOOL_PERMISSIONS))) == ""
+    identity = await manager.create("shop")
+    with pytest.raises(BrowserIdentityError, match="could not be read: reading invisible-playwright-mcp exited 127") as raised:
+        await manager.launch(identity.id)
+    assert raised.value.code == "launch_failed"
+    assert not manager.is_open(identity.id)
+
+
+def test_a_page_tool_the_installed_server_does_not_serve_is_not_offered(tmp_path: Path, dot_store: DotStore) -> None:
+    """The permission table names the page tools a Dot may be offered; the installed server decides which exist."""
+    served = dict(SERVER_TOOLS)
+    del served["browser_upload_files"]
+    _, registry = _registry(tmp_path, dot_store, dataclasses.replace(server_interface(), tools=served))
+
+    assert not registry.has("browser_upload_files")
+    assert all(registry.has(name) for name in PAGE_TOOLS - {"browser_upload_files"})
+    rows = {row["name"]: row for row in tool_table(registry, set(TOOL_PERMISSIONS))}
+    assert rows["browser_upload_files"] == {
+        "name": "browser_upload_files", "permission": "browser.act", "offered": False, "description": UNSERVED,
+    }
 
 
 def test_every_page_tool_is_exercised_by_the_table_above() -> None:

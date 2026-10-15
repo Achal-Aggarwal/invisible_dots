@@ -56,18 +56,22 @@ class ToolEntry:
     """What the contract knows of one tool.
 
     permission: the key of the host's permission map the tool exercises.
-    build: factory taking ToolDeps to instantiate the Tool.
+    build: factory taking ToolDeps to instantiate the Tool; None for a page tool the installed browser server does
+        not serve.
     target: from the call's arguments, the one line `tool.called` shows of it (None: nothing).
     starts_terminal: from the call's arguments, whether it starts a terminal session.
     arguments: from the call's arguments, the ones an `approval.requested` shows the person.
     """
 
     permission: str
-    build: Callable[[ToolDeps], Tool]
+    build: Callable[[ToolDeps], Tool | None]
     target: Callable[[Mapping[str, Any]], str | None]
     # Whether the call starts a terminal session, which `tool.called` marks (`tty`); no other tool does.
     starts_terminal: Callable[[Mapping[str, Any]], bool] = targets.never_starts_terminal
     arguments: Callable[[Mapping[str, Any]], dict[str, Any]] = targets.all_arguments
+    # A page tool: one of invisible-playwright-mcp's, which exists only when the server installed on the computer
+    # serves it (`build` returns None otherwise).
+    served_by_browser: bool = False
 
 
 def _build_exec(deps: ToolDeps) -> Tool:
@@ -166,13 +170,17 @@ def _build_browser_identity_close(deps: ToolDeps) -> Tool:
     return BrowserIdentityCloseTool(deps.browser)
 
 
-def _build_page_tool(name: str) -> Callable[[ToolDeps], Tool]:
-    """The builder of a page tool: the tool of invisible-playwright-mcp of that name (browser_tools.SERVER_TOOLS)."""
+def _build_page_tool(name: str) -> Callable[[ToolDeps], Tool | None]:
+    """The builder of a page tool: the tool of that name of the invisible-playwright-mcp installed on the computer
+    (`BrowserManager.interface`); None when that server does not serve it, or could not be read."""
 
-    def build(deps: ToolDeps) -> Tool:
-        from nanobot.dots.browser_tools import SERVER_TOOLS, BrowserPageTool
+    def build(deps: ToolDeps) -> Tool | None:
+        from nanobot.dots.browser_tools import BrowserPageTool
 
-        return BrowserPageTool(deps.browser, SERVER_TOOLS[name])
+        interface = deps.browser.interface
+        if interface is None or name not in interface.tools:
+            return None
+        return BrowserPageTool(deps.browser, interface.tools[name], interface.instructions)
 
     return build
 
@@ -208,20 +216,20 @@ TOOL_PERMISSIONS: Mapping[str, ToolEntry] = MappingProxyType(
         "browser_identity_delete": ToolEntry("browser.identity.delete", _build_browser_identity_delete, targets.identity_target),
         "browser_identity_launch": ToolEntry("browser.identity.launch", _build_browser_identity_launch, targets.identity_target),
         "browser_identity_close": ToolEntry("browser.identity.close", _build_browser_identity_close, targets.identity_target),
-        "browser_navigate": ToolEntry("browser.navigate", _build_page_tool("browser_navigate"), targets.browser_navigate_target, arguments=targets.navigate_arguments),
-        "browser_snapshot": ToolEntry("browser.read", _build_page_tool("browser_snapshot"), targets.browser_identity_only_target),
-        "browser_read_text": ToolEntry("browser.read", _build_page_tool("browser_read_text"), targets.browser_selector_target),
-        "browser_read_html": ToolEntry("browser.read", _build_page_tool("browser_read_html"), targets.browser_identity_only_target),
-        "browser_take_screenshot": ToolEntry("browser.read", _build_page_tool("browser_take_screenshot"), targets.browser_identity_only_target),
+        "browser_navigate": ToolEntry("browser.navigate", _build_page_tool("browser_navigate"), targets.browser_navigate_target, served_by_browser=True, arguments=targets.navigate_arguments),
+        "browser_snapshot": ToolEntry("browser.read", _build_page_tool("browser_snapshot"), targets.browser_identity_only_target, served_by_browser=True),
+        "browser_read_text": ToolEntry("browser.read", _build_page_tool("browser_read_text"), targets.browser_selector_target, served_by_browser=True),
+        "browser_read_html": ToolEntry("browser.read", _build_page_tool("browser_read_html"), targets.browser_identity_only_target, served_by_browser=True),
+        "browser_take_screenshot": ToolEntry("browser.read", _build_page_tool("browser_take_screenshot"), targets.browser_identity_only_target, served_by_browser=True),
         # Reads with JavaScript; the server refuses a script that acts on the page and names the tool to use instead.
-        "browser_evaluate": ToolEntry("browser.read", _build_page_tool("browser_evaluate"), targets.browser_identity_only_target),
-        "browser_click": ToolEntry("browser.act", _build_page_tool("browser_click"), targets.browser_selector_target),
-        "browser_click_at": ToolEntry("browser.act", _build_page_tool("browser_click_at"), targets.browser_click_at_target),
-        "browser_type": ToolEntry("browser.act", _build_page_tool("browser_type"), targets.browser_selector_target),
-        "browser_press_key": ToolEntry("browser.act", _build_page_tool("browser_press_key"), targets.browser_press_key_target),
-        "browser_select_option": ToolEntry("browser.act", _build_page_tool("browser_select_option"), targets.browser_selector_target),
+        "browser_evaluate": ToolEntry("browser.read", _build_page_tool("browser_evaluate"), targets.browser_identity_only_target, served_by_browser=True),
+        "browser_click": ToolEntry("browser.act", _build_page_tool("browser_click"), targets.browser_selector_target, served_by_browser=True),
+        "browser_click_at": ToolEntry("browser.act", _build_page_tool("browser_click_at"), targets.browser_click_at_target, served_by_browser=True),
+        "browser_type": ToolEntry("browser.act", _build_page_tool("browser_type"), targets.browser_selector_target, served_by_browser=True),
+        "browser_press_key": ToolEntry("browser.act", _build_page_tool("browser_press_key"), targets.browser_press_key_target, served_by_browser=True),
+        "browser_select_option": ToolEntry("browser.act", _build_page_tool("browser_select_option"), targets.browser_selector_target, served_by_browser=True),
         # Attaches files of the dot user, the ones its commands can read, to a file field of the page.
-        "browser_upload_files": ToolEntry("browser.act", _build_page_tool("browser_upload_files"), targets.browser_selector_target),
+        "browser_upload_files": ToolEntry("browser.act", _build_page_tool("browser_upload_files"), targets.browser_selector_target, served_by_browser=True),
         # Asks the host to add an MCP server to the Dot's config; the host checks the permission again and writes it.
         "add_mcp_server": ToolEntry("mcp.servers.add", _build_add_mcp_server, targets.add_mcp_server_target),
     }
@@ -296,6 +304,10 @@ def offered_mcp_servers(servers: Collection[str], permissions: Mapping[str, str]
     return sorted(server for server in servers if permissions.get(mcp_permission(server)) in ("allow", "ask"))
 
 
+# What GET /tools says of a page tool of the table the browser server installed on this computer does not serve.
+UNSERVED = "not served by the browser server installed on this computer"
+
+
 def tool_table(registry: ToolRegistry, offered: Collection[str]) -> list[dict[str, Any]]:
     """One row per tool of the table, as `GET /tools` shows it: the name, the permission it exercises,
     whether the model is offered it now (`offered` is what the projection offers) and what its schema says
@@ -303,6 +315,10 @@ def tool_table(registry: ToolRegistry, offered: Collection[str]) -> list[dict[st
     rows: list[dict[str, Any]] = []
     for name, entry in TOOL_PERMISSIONS.items():
         tool = registry.get(name)
+        if tool is None and entry.served_by_browser:
+            # A page tool the browser server installed on this computer does not serve (build_registry).
+            rows.append({"name": name, "permission": entry.permission, "offered": False, "description": UNSERVED})
+            continue
         if tool is None:
             raise LookupError(f'the registry has no tool "{name}" of the permission table')
         rows.append(
@@ -312,11 +328,14 @@ def tool_table(registry: ToolRegistry, offered: Collection[str]) -> list[dict[st
 
 
 def build_registry(deps: ToolDeps) -> ToolRegistry:
-    """Register exactly the tools of the permission table on a new registry."""
+    """Register the tools of the permission table on a new registry: every one, but a page tool the browser server
+    installed on the computer does not serve, which no turn can offer (registry views take only what is registered)."""
     from nanobot.agent.tools.registry import ToolRegistry
 
     registry = ToolRegistry()
     for entry in TOOL_PERMISSIONS.values():
-        registry.register(entry.build(deps))
+        tool = entry.build(deps)
+        if tool is not None:
+            registry.register(tool)
     return registry
 

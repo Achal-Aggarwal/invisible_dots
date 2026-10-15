@@ -7,9 +7,8 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { GUEST_PATHS } from "@invisible-dots/shared";
 import { describe, expect, it } from "vitest";
-import { BUILDER_PYTHON_LOCK, defaultAssetRoot, GUEST_ASSETS, GUEST_UNITS, unitAsset } from "../src/assets.js";
+import { BUILDER_OTHER_BROWSERS, defaultAssetRoot, GUEST_ASSETS, GUEST_UNITS, unitAsset } from "../src/assets.js";
 import { GUEST_PINS } from "../src/pins.js";
-import { parsePythonLock } from "../src/python-lock.js";
 
 const root = defaultAssetRoot();
 const text = (relative: string) => readFileSync(join(root, relative), "utf8");
@@ -175,47 +174,54 @@ describe("the Dot's browser", () => {
   const provision = text("builder/provision.sh");
   const build = text("builder/build-browser-env.sh");
 
-  it("is built by the script the seed carries, from the hashed lock on the seed, never resolved from the index", () => {
-    expect(provision).toContain('bash "$payload/$BROWSER_BUILD" "$payload/$PYTHON_LOCK" "$mcp_env"');
+  it("is the release the build resolved, installed exactly by the script the seed carries", () => {
+    expect(provision).toContain('bash "$payload/$BROWSER_BUILD" "$mcp_env" \\\n');
+    expect(provision).toContain('"invisible-playwright-mcp==$MCP_VERSION" "invisible-playwright==$PLAYWRIGHT_VERSION" "invisible-core==$CORE_VERSION"');
     expect(provision).toContain("mcp_env=/home/dot/.local/share/invisible-dots/mcp\n");
     expect(build).toContain('as_dot uv venv --quiet --python /usr/bin/python3 "$env_dir"');
-    expect(build).toContain('as_dot uv pip install --no-cache --python "$env_dir/bin/python" --require-hashes --only-binary :all: -r "$dot_lock"');
+    // Wheels only, the requirements given or the newest server.
+    expect(build).toContain('as_dot uv pip install --no-cache --python "$env_dir/bin/python" --only-binary :all: "${requirements[@]}"');
+    expect(build).toContain('[ "${#requirements[@]}" -gt 0 ] || requirements=(invisible-playwright-mcp)');
     expect(build).not.toMatch(/uv tool install/);
     expect(build).toContain('as_dot ln -sfn "$env_dir/bin/invisible-playwright-mcp" "$bin_dir/invisible-playwright-mcp"');
     expect(build).toContain('as_dot "$env_dir/bin/invisible-playwright" fetch');
   });
 
-  it("the lock in this checkout pins every package with hashes, both top-level packages included", () => {
-    const lock = parsePythonLock(text(BUILDER_PYTHON_LOCK));
-    expect(lock.mcpVersion).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(lock.playwrightVersion).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(lock.packages.size).toBeGreaterThan(10);
+  it("records the versions the environment holds, read from it, not the ones it was asked for", () => {
+    expect(provision).toContain("installed_version() { as_dot \"$mcp_env/bin/python\" -c 'import sys, importlib.metadata as m; print(m.version(sys.argv[1]))' \"$1\"; }");
+    for (const name of ["invisible-playwright-mcp", "invisible-playwright", "invisible-core"]) {
+      expect(provision).toContain(`component ${name} "$(installed_version ${name})"`);
+    }
   });
 
   /**
-   * Owner's rule: the only browser of a Dot is invisible-playwright-mcp. No other browser, headless
-   * browser or browser library enters the guest image: not as an apt package, not in the MCP server's
-   * lock, not as a command of the scripts that build it.
+   * Owner's rule: the only browser of a Dot is invisible-playwright-mcp. No other browser, headless browser or browser
+   * library enters the guest image: not as an apt package, not among the Python packages the browser's environment
+   * installs (build-browser-env.sh refuses them, reading the same list), not as a command of the scripts that build it.
    */
-  const OTHER_BROWSER =
-    /^(chromium|chrome|google-chrome|firefox|epiphany|midori|falkon|konqueror|qutebrowser|lynx|links2?|w3m|elinks|selenium|seleniumbase|puppeteer|pyppeteer|playwright|patchright|undetected-chromedriver|chromedriver|geckodriver|webkit|webkit2gtk)(-.*)?$/;
+  const otherBrowsers = text(BUILDER_OTHER_BROWSERS)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  const isOtherBrowser = (name: string) => otherBrowsers.some((other) => name === other || name.startsWith(`${other}-`));
 
   it("installs no other browser, headless browser or browser library", () => {
-    expect(GUEST_PINS.apt_packages.filter((name) => OTHER_BROWSER.test(name))).toEqual([]);
-    const lock = parsePythonLock(text(BUILDER_PYTHON_LOCK));
-    expect([...lock.packages.keys()].filter((name) => OTHER_BROWSER.test(name))).toEqual([]);
+    expect(GUEST_PINS.apt_packages.filter(isOtherBrowser)).toEqual([]);
+    expect(build).toContain('other_browsers="$(dirname "${BASH_SOURCE[0]}")/other-browsers.txt"');
+    expect(build).toContain('installed="$(as_dot uv pip freeze --python "$env_dir/bin/python"');
+    expect(build).toContain("another browser would enter the image (owner's rule)");
     for (const [name, content] of [["provision.sh", provision], ["build-browser-env.sh", build]] as const) {
       expect(content, name).not.toMatch(/\b(chromium|google-chrome|selenium|puppeteer|patchright|chromedriver|geckodriver)\b/i);
       expect(content, name).not.toMatch(/\bplaywright install\b/);
     }
   });
 
-  it("the check above refuses what it is meant to refuse and lets the Dot's browser through", () => {
+  it("the list refuses what it is meant to refuse and lets the Dot's browser through", () => {
     for (const name of ["chromium", "chromium-browser", "firefox", "google-chrome-stable", "selenium", "playwright", "patchright", "pyppeteer", "lynx", "webkit2gtk-4.1"]) {
-      expect(OTHER_BROWSER.test(name), name).toBe(true);
+      expect(isOtherBrowser(name), name).toBe(true);
     }
     for (const name of ["invisible-playwright", "invisible-playwright-mcp", "invisible-core", "libgtk-3-0t64", "xvfb", "imagemagick", "fonts-dejavu-core"]) {
-      expect(OTHER_BROWSER.test(name), name).toBe(false);
+      expect(isOtherBrowser(name), name).toBe(false);
     }
   });
 });

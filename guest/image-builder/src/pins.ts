@@ -31,8 +31,9 @@ export interface BaseImagePin {
 }
 
 /**
- * The Python packages are not here: builder/mcp-requirements.lock pins them
- * with their hashes, and is the one place their versions live (python-lock.ts).
+ * The Dot's browser is not here: the image installs the newest release of
+ * invisible-playwright-mcp, resolved from the index at each build
+ * (browser-release.ts), and no version of it is written in the repository.
  */
 export interface GuestPins {
   uv: PinnedDownload;
@@ -123,7 +124,7 @@ export function parseBaseImagePin(value: unknown): BaseImagePin {
 export function parseGuestPins(value: unknown): GuestPins {
   const where = "guest/image-builder/pins.json";
   const o = asObject(value, where);
-  if ("python_packages" in o) throw new Error(`${where}: python_packages moved to builder/mcp-requirements.lock, which pins them with their hashes`);
+  if ("python_packages" in o) throw new Error(`${where}: python_packages has no place here: the image installs the newest release of the Dot's browser (browser-release.ts)`);
   const apt = o.apt_packages;
   if (!Array.isArray(apt) || apt.length === 0) throw new Error(`${where}: apt_packages must be a non-empty array`);
   const snapshot = field(o, "apt_snapshot", where);

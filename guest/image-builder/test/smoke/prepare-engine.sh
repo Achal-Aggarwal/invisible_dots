@@ -12,12 +12,12 @@
 #                 engine lock (the script provision.sh runs), after the same
 #                 packages and the same uv the builder VM has
 #   runtime disk: the engine's source at /opt/invisible-dots/engine, the files
-#                 runtime.ts stages (every .py and .json, the .md templates, the lock,
+#                 runtime.ts stages (every .py, the .md templates, the lock,
 #                 LICENSE, UPSTREAM.md), world-readable as on the ISO
 # The browser suite builds one more thing, as the golden image does it: the apt packages of
 # pins.json (the desktop, Firefox's libraries, ImageMagick) and the Dot's browser
-# (builder/build-browser-env.sh on the hashed mcp-requirements.lock: the MCP server's
-# environment and the engine of the browser).
+# (builder/build-browser-env.sh: the newest invisible-playwright-mcp's environment and
+# the engine of the browser).
 set -euo pipefail
 : "${TREE:?run.sh sets TREE}" "${AGENTD_BIN:?run.sh sets AGENTD_BIN}"
 suite=${SMOKE_SUITE:-engine}
@@ -58,7 +58,7 @@ bash "$builder/build-engine-env.sh" "$builder/engine-requirements.lock" /opt/inv
 
 # The runtime disk's files, at the paths the ISO has them (it carries no __pycache__, no tests).
 mkdir -p /opt/invisible-dots/engine
-(cd "$engine_src" && find nanobot \( -name '*.py' -o -name '*.json' -o -path 'nanobot/templates/*.md' \) -type f -exec cp --parents {} /opt/invisible-dots/engine/ \;)
+(cd "$engine_src" && find nanobot \( -name '*.py' -o -path 'nanobot/templates/*.md' \) -type f -exec cp --parents {} /opt/invisible-dots/engine/ \;)
 cp "$builder/engine-requirements.lock" /opt/invisible-dots/engine/requirements.lock
 cp "$engine_src/LICENSE" "$engine_src/UPSTREAM.md" /opt/invisible-dots/engine/
 chmod -R a+rX,go-w /opt/invisible-dots
@@ -79,8 +79,9 @@ if [ "$suite" = browser ]; then
   snapshot=$(jq -r '.apt_snapshot' "$TREE/guest/image-builder/pins.json")
   apt-get --snapshot "$snapshot" --error-on=any update -qq >/dev/null
   apt-get --snapshot "$snapshot" install -y -qq --no-install-recommends $(jq -r '.apt_packages[]' "$TREE/guest/image-builder/pins.json") >/dev/null
-  # The Dot's browser, with the script provision.sh runs on the same lock. dot reaches its home, not the tree.
-  bash "$builder/build-browser-env.sh" "$builder/mcp-requirements.lock" /home/dot/.local/share/invisible-dots/mcp
+  # The Dot's browser, with the script provision.sh runs: the newest release, as the next image installs it. dot
+  # reaches its home, not the tree.
+  bash "$builder/build-browser-env.sh" /home/dot/.local/share/invisible-dots/mcp
 fi
 
 exec bash "$checks"

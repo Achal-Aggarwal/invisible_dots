@@ -51,10 +51,10 @@ before the MCP client stops the process two seconds after closing its input.
   tools, and `browser_watch` is the frame the UI shows.
 - The server's instructions go into the system prompt whenever a page tool is
   offered.
-- The engine reads both from a capture of the pinned version
-  (`nanobot/dots/invisible_playwright_mcp.json`, written by
-  `guest/image-builder/builder/capture-mcp-interface.py`), held to the lock by a
-  test.
+- The engine reads both from the server its Dot has, when it starts
+  (`nanobot/dots/server_interface.py`): a Dot keeps the golden image it was made
+  from, so the engine offers what that server serves, whatever its version. The
+  image takes the newest release at each build; nothing pins it.
 - What the engine still adds is what only a Dot knows: a URL that is not
   `http://` or `https://` is refused before it reaches the server, and the skill
   is about identities.

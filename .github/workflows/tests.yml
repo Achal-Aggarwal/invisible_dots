@@ -237,8 +237,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      # The golden image's browser built as provision.sh builds it (apt packages of pins.json, the hashed
-      # mcp-requirements.lock, the engine of the browser), a desktop on :0, and the Dot
+      # The golden image's browser built as provision.sh builds it (apt packages of pins.json, the newest
+      # invisible-playwright-mcp, the engine of the browser), a desktop on :0, and the Dot
       # (dot-agentd and the engine under their two users) browsing pages of the container. It needs the
       # network for those downloads and for the egress address of a launch. Same exit rule and summary
       # line as the smoke job.

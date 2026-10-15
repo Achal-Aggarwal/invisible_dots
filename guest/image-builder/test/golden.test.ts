@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { hostPaths, type HostPaths } from "@invisible-dots/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BUILDER_BROWSER_BUILD, BUILDER_ENGINE_BUILD, BUILDER_ENGINE_LOCK, BUILDER_PROVISION, BUILDER_PYTHON_LOCK, BUILDER_USER_DATA, defaultAssetRoot } from "../src/assets.js";
+import { BUILDER_BROWSER_BUILD, BUILDER_ENGINE_BUILD, BUILDER_ENGINE_LOCK, BUILDER_OTHER_BROWSERS, BUILDER_PROVISION, BUILDER_USER_DATA, defaultAssetRoot } from "../src/assets.js";
+import type { BrowserRelease } from "../src/browser-release.js";
 import { buildGoldenImage, GOLDEN_DEFAULTS, GoldenBuildError, type GoldenBuildOptions } from "../src/golden.js";
 import { readManifest, verifyImage, type GoldenManifest } from "../src/manifest.js";
 import type { BaseImagePin, GuestPins } from "../src/pins.js";
-import { parsePythonLock } from "../src/python-lock.js";
 import { fakeRunner, type VmScript } from "./fake-runner.js";
 import { sha256, startFakeHttp, type FakeHttp } from "./http-fixture.js";
 
@@ -17,6 +17,8 @@ const UV = Buffer.from("uv tarball ".repeat(1000));
 const TUNNEL = Buffer.from("tunnel binary ".repeat(1000));
 const UV_FILE = "uv-x86_64-unknown-linux-gnu.tar.gz";
 const TUNNEL_FILE = "hev-socks5-tunnel-linux-x86_64";
+/** The release the builds below install, as browser-release.ts would read it off the index. */
+const BROWSER: BrowserRelease = { mcp: "0.72.2", playwright: "0.35.8", core: "47.39.0" };
 
 const OK_CONSOLE = [
   "[    0.000000] Linux version 6.8.0",
@@ -84,6 +86,7 @@ function options(script: VmScript, extra: Partial<GoldenBuildOptions> = {}) {
     serialPollMs: 5,
     // A prebuilt image is looked for in the release of these inputs on GitHub; these tests build.
     prebuilt: false,
+    browser: BROWSER,
     ...extra,
   };
   return { runner, opts };
@@ -133,7 +136,8 @@ describe("buildGoldenImage", () => {
       pinned: {
         uv: { version: "0.12.22", sha256: sha256(UV) },
         "invisible-playwright-mcp": "0.72.2",
-        "invisible-playwright": "0.35.7",
+        "invisible-playwright": "0.35.8",
+        "invisible-core": "47.39.0",
         apt_snapshot: "20261010T000000Z",
         apt_packages: ["xvfb", "imagemagick"],
       },
@@ -173,7 +177,7 @@ describe("buildGoldenImage", () => {
   /** A copy of the guest files the digest reads, for a test that changes one of them. */
   async function assetCopy(): Promise<string> {
     const assetRoot = join(home, "assets");
-    for (const relative of [BUILDER_USER_DATA, BUILDER_PROVISION, BUILDER_PYTHON_LOCK, BUILDER_ENGINE_LOCK, BUILDER_ENGINE_BUILD, BUILDER_BROWSER_BUILD]) {
+    for (const relative of [BUILDER_USER_DATA, BUILDER_PROVISION, BUILDER_ENGINE_LOCK, BUILDER_ENGINE_BUILD, BUILDER_BROWSER_BUILD, BUILDER_OTHER_BROWSERS]) {
       await mkdir(join(assetRoot, dirname(relative)), { recursive: true });
       await copyFile(join(defaultAssetRoot(), relative), join(assetRoot, relative));
     }
@@ -217,6 +221,17 @@ describe("buildGoldenImage", () => {
     expect(second.version).not.toBe(first.version);
   });
 
+  it("builds a new version when only the list of browsers the image refuses changes", async () => {
+    const first = await buildGoldenImage(options({ console: OK_CONSOLE, exit: 0 }).opts);
+    const assetRoot = await assetCopy();
+    const listPath = join(assetRoot, BUILDER_OTHER_BROWSERS);
+    await writeFile(listPath, `${await readFile(listPath, "utf8")}servo\n`);
+
+    const second = await buildGoldenImage(options({ console: OK_CONSOLE, exit: 0 }, { assetRoot }).opts);
+    expect(second.created).toBe(true);
+    expect(second.version).not.toBe(first.version);
+  });
+
   it("refuses an engine lock with a requirement that has no hash, before booting anything", async () => {
     const assetRoot = await assetCopy();
     const lockPath = join(assetRoot, BUILDER_ENGINE_LOCK);
@@ -227,22 +242,18 @@ describe("buildGoldenImage", () => {
     expect(runner.spawns).toHaveLength(0);
   });
 
-  it("builds a new version when only the Python lock changes, a transitive package included", async () => {
+  it("builds a new image when a new release of the browser is published, and records that release", async () => {
     const first = await buildGoldenImage(options({ console: OK_CONSOLE, exit: 0 }).opts);
-    // A copy of the guest files whose lock differs in one hash of one dependency.
-    const assetRoot = await assetCopy();
-    const lockPath = join(assetRoot, BUILDER_PYTHON_LOCK);
-    const lock = await readFile(lockPath, "utf8");
-    const hash = /--hash=sha256:([0-9a-f]{64})/.exec(lock.slice(lock.indexOf("\nanyio==")))![1]!;
-    await writeFile(lockPath, lock.replace(hash, "0".repeat(64)));
+    // Everything the same but the newest invisible-playwright on the index: an image of the last release is not reused.
+    const next: BrowserRelease = { ...BROWSER, playwright: "0.35.9", core: "47.40.0" };
 
-    const second = await buildGoldenImage(options({ console: OK_CONSOLE, exit: 0 }, { assetRoot }).opts);
+    const second = await buildGoldenImage(options({ console: OK_CONSOLE, exit: 0 }, { browser: next }).opts);
+
     expect(second.created).toBe(true);
     expect(second.version).not.toBe(first.version);
     const manifest = (await readManifest(second.manifest)) as GoldenManifest;
-    expect(manifest.pinned["mcp-requirements.lock"]).toBe(sha256(Buffer.from(await readFile(lockPath))));
-    // The versions in the manifest are the lock's own.
-    expect(manifest.pinned["invisible-playwright-mcp"]).toBe(parsePythonLock(lock).mcpVersion);
+    expect(manifest.pinned).toMatchObject({ "invisible-playwright-mcp": "0.72.2", "invisible-playwright": "0.35.9", "invisible-core": "47.40.0" });
+    expect(logs).toContain("the browser: invisible-playwright-mcp 0.72.2 (invisible-playwright 0.35.9, invisible-core 47.40.0)");
   });
 
   it("fails with the provisioner's reason and keeps the work directory", async () => {

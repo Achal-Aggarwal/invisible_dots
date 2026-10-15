@@ -27,7 +27,7 @@ async function writeEngineTree(root: string): Promise<void> {
     "nanobot/dots/main.py": "def main(): ...\n",
     "nanobot/templates/agent/tool_contract.md": "# contract\n",
     "nanobot/README.md": "not a template: left out\n",
-    "nanobot/dots/server.json": "{}\n",
+    "nanobot/dots/data.json": "not source: left out\n",
     "nanobot/__pycache__/main.cpython-312.pyc": "bytecode",
     "skills/web-forms/SKILL.md": "---\nname: web-forms\ndescription: Fill a form.\n---\n",
     "skills/web-forms/notes.txt": "beside the skill: left out\n",
@@ -119,7 +119,6 @@ describe("buildRuntimeIso", () => {
         "engine/UPSTREAM.md",
         "engine/nanobot/__init__.py",
         "engine/nanobot/dots/main.py",
-        "engine/nanobot/dots/server.json",
         "engine/nanobot/templates/agent/tool_contract.md",
         "engine/skills/web-forms/SKILL.md",
         "install.sh",
@@ -136,8 +135,6 @@ describe("buildRuntimeIso", () => {
     expect(read("units/dot-agentd.service")).toEqual(await readFile(join(defaultAssetRoot(), "units", "dot-agentd.service")));
     // The engine's source as it is.
     expect(read("engine/nanobot/dots/main.py").toString()).toBe("def main(): ...\n");
-    // And its data: the engine reads the browser server's capture at start.
-    expect(read("engine/nanobot/dots/server.json").toString()).toBe("{}\n");
     expect(read("engine/LICENSE").toString()).toBe("MIT\n");
 
     const manifest = (await readManifest(result.manifest)) as RuntimeManifest;
@@ -194,12 +191,13 @@ describe("buildRuntimeIso", () => {
       "engine/nanobot/dots/main.py",
       "engine/nanobot/agent/tools/shell.py",
       "engine/nanobot/templates/agent/tool_contract.md",
-      "engine/nanobot/dots/invisible_playwright_mcp.json",
+      // Run by the installed browser server's own interpreter, which reads it from the runtime disk (server_interface.py).
+      "engine/nanobot/dots/server_capture.py",
       "engine/skills/invisible-playwright/SKILL.md",
     ]) {
       expect(staged).toContain(path);
     }
-    expect(staged.filter((path) => path.startsWith("engine/") && !/\.(py|md|json)$|LICENSE$/.test(path))).toEqual([]);
+    expect(staged.filter((path) => path.startsWith("engine/") && !/\.(py|md)$|LICENSE$/.test(path))).toEqual([]);
     expect(staged.some((path) => path.includes("tests/") || path.includes("__pycache__"))).toBe(false);
     // The ISO's own limits (8 levels, names of 64 characters) hold for every one of them.
     const result = await buildRuntimeIso({ inputs: real, paths, now: () => at("08:00:00") });

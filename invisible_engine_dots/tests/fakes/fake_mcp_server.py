@@ -8,40 +8,73 @@ assert on the process's environment, working directory and calls. Like the real 
 `$INVISIBLE_MCP_HOME/control.json`, because the engine hands the process an environment of its own
 and a test cannot add a variable to it.
 
-Its instructions and `tools/list` are the real server's, as the engine reads them
-(`nanobot/dots/invisible_playwright_mcp.json`, captured in the mode the engine starts it in), and the SDK checks
-every call against those input schemas. The server also refuses an argument the real tool does not have,
-so a parameter renamed in a call fails here and not only inside a Dot.
+Its instructions and `tools/list` are a capture of the real server's in the mode the engine starts it in
+(`invisible_playwright_mcp.json` beside this file), and the SDK checks every call against those input schemas. The
+server also refuses an argument the real tool does not have, so a parameter renamed in a call fails here and not only
+inside a Dot.
 
-`install_fake_mcp` writes the executable the manager runs as the MCP command, the way
-`local_computer.install_fake_relay` does for the relay.
+`install_fake_mcp` lays the fake out like an installed server (server_package/): an environment whose `python`
+imports `invisible_playwright_mcp`, and a command beside it that runs `python -m invisible_playwright_mcp`, so the
+engine reads its interface the way it reads the real one (server_interface.py) and runs it as the MCP command.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
+import site
 import sys
-import uuid
+import tempfile
+import venv
 from pathlib import Path
 from typing import Any
 
-# Beside the engine's package in the repository, and copied to the same place relative to this file by the smoke.
-INTERFACE = Path(__file__).resolve().parents[2] / "nanobot" / "dots" / "invisible_playwright_mcp.json"
-SCRIPT = Path(__file__).resolve()
+INTERFACE = Path(__file__).resolve().with_name("invisible_playwright_mcp.json")
+FAKES = Path(__file__).resolve().parent
 
 # A 1x1 transparent PNG, and a JPEG of one pixel.
 PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 JPEG = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k="
 
 
-def install_fake_mcp(directory: Path) -> Path:
-    """Write an executable that runs this file with the interpreter of the tests; returns its path."""
-    script = directory / f"fake-mcp-{uuid.uuid4().hex}"
-    script.write_bytes(f"#!/bin/sh\nexec '{sys.executable}' '{SCRIPT}' \"$@\"\n".encode("utf-8"))
-    script.chmod(0o755)
-    return script
+def install_fake_mcp(directory: Path | None = None) -> Path:
+    """The command of a fake server installed like the real one; its environment is made once per process.
+
+    The environment's `python` is a real virtual environment's, so it runs `-I` as the engine has it run (isolated:
+    no PYTHONPATH, no user site); a .pth file gives it this interpreter's packages (the MCP SDK), the fake package
+    and this directory. `directory` is accepted for the callers that name where their programs go; the one
+    environment serves them all.
+    """
+    return _fake_server_command()
+
+
+@functools.cache
+def _fake_server_command() -> Path:
+    env = Path(tempfile.mkdtemp(prefix="fake-invisible-playwright-mcp-"))
+    venv.EnvBuilder(with_pip=False).create(env)
+    bin_dir = env / ("Scripts" if os.name == "nt" else "bin")
+    purelib = Path(next(p for p in (env / "lib").glob("python*/site-packages")))
+    paths = [str(FAKES), str(FAKES / "server_package"), *site.getsitepackages(), *[p for p in sys.path if p.endswith("site-packages")]]
+    (purelib / "fake_server.pth").write_text("\n".join(dict.fromkeys(paths)) + "\n", encoding="utf-8")
+    command = bin_dir / "invisible-playwright-mcp"
+    command.write_text(f'#!/bin/sh\nexec "{bin_dir / "python"}" -m invisible_playwright_mcp "$@"\n', encoding="utf-8")
+    command.chmod(0o755)
+    return command
+
+
+def interface() -> dict[str, Any]:
+    """The captured interface the fake serves, as server_capture.py prints it."""
+    return json.loads(INTERFACE.read_text(encoding="utf-8"))
+
+
+@functools.cache
+def server_interface() -> Any:
+    """The fake's interface as the engine holds it, for the BrowserManagers of the tests."""
+    from nanobot.dots.server_interface import parse_server_interface
+
+    return parse_server_interface(interface())
 
 
 def read_record(mcp_home: Path) -> list[dict[str, Any]]:
@@ -75,10 +108,6 @@ middle of a call; to `slow://...` it answers after 0.3 s. Each call is recorded 
     (mcp_home / "control.json").write_bytes(json.dumps(control).encode("utf-8"))
 
 
-def _interface() -> dict[str, Any]:
-    return json.loads(INTERFACE.read_text(encoding="utf-8"))
-
-
 async def _serve() -> None:
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -107,8 +136,8 @@ async def _serve() -> None:
         saved.parent.mkdir(parents=True, exist_ok=True)
         saved.write_bytes(json.dumps({"browsers": {role: who}, "focus": role}).encode("utf-8"))
 
-    interface = _interface()
-    tools = {tool["name"]: tool for tool in interface["tools"]}
+    interface_data = interface()
+    tools = {tool["name"]: tool for tool in interface_data["tools"]}
     state: dict[str, Any] = {
         "download_left": int(control.get("download_answers", 0)),
         "lose_browser": bool(control.get("lose_browser_once", False) or control.get("lose_browser_always", False)),
@@ -131,7 +160,7 @@ async def _serve() -> None:
         if unknown:
             return text(f"invalid arguments for {name}: it has no argument {', '.join(unknown)}", error=True)
         # Started as the engine starts the real one (INVISIBLE_MCP_HOST_MANAGED=1), it serves `main` alone.
-        role = interface["browser"]
+        role = interface_data["browser"]
 
         if name == "browser_open":
             if control.get("fail_open"):
@@ -144,7 +173,7 @@ async def _serve() -> None:
                 )
             state["open"] = True
             remember(role)
-            return text(interface["answers"]["opened"] % role + " seed: remembered by the profile")
+            return text(interface_data["answers"]["opened"] % role + " seed: remembered by the profile")
         if name == "browser_close":
             if control.get("refuse_close"):
                 return text(f"the {role} browser could not be closed", error=True)
@@ -153,11 +182,11 @@ async def _serve() -> None:
         if name == "browser_list":
             return text(json.dumps({"focus": "main", "browsers": []}))
         if not state["open"]:
-            return tool_error(name, interface["answers"]["not_open"] % role)
+            return tool_error(name, interface_data["answers"]["not_open"] % role)
         if state["lose_browser"]:
             state["lose_browser"] = bool(control.get("lose_browser_always", False))
             state["open"] = False
-            return tool_error(name, interface["answers"]["gone"] % role)
+            return tool_error(name, interface_data["answers"]["gone"] % role)
 
         if name == "browser_status":
             return text(f"the {role} browser is open on {state['url']}")
@@ -199,7 +228,7 @@ async def _serve() -> None:
             return text(f"attached {len(args['paths'])} file(s) to {args['selector']}")
         return text(f"unknown tool {name}", error=True)
 
-    server: Server[Any] = Server("fake-stealth", instructions=interface["instructions"])
+    server: Server[Any] = Server("fake-stealth", version=interface_data["version"], instructions=interface_data["instructions"])
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -226,5 +255,9 @@ async def _serve() -> None:
     record({"kind": "exit", "code": 0})
 
 
-if __name__ == "__main__":
+def main() -> None:
     asyncio.run(_serve())
+
+
+if __name__ == "__main__":
+    main()

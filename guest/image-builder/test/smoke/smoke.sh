@@ -99,16 +99,24 @@ check "dotagentd is in no group but its own, and dot is in neither of the two gr
 # --- the stand-in for OpenRouter (the key is lib.sh's) ---
 start_fake_openrouter
 # --- the stand-in for invisible-playwright-mcp ---
-# The engine's own test fake (the one owner of what a stand-in answers) and what it serves, the engine's capture
-# of the pinned server (nanobot/dots/invisible_playwright_mcp.json, where the fake looks for it two directories
-# up), copied out of the tree under test where dot may reach them. It runs on
-# the engine's python, which has the `mcp` package, as dot: the engine starts it through dot-agentd's relay.
+# The engine's own test fake (the one owner of what a stand-in answers), the capture it serves and the package that
+# makes it look installed, copied out of the tree under test where dot may reach them, and installed the way the real
+# server is: an environment whose python imports `invisible_playwright_mcp` (the engine's python lends it the `mcp`
+# package), with the command beside that python. The engine reads what it serves the way it reads the real server's
+# (server_interface.py) and starts it as dot through dot-agentd's relay.
 ENGINE_TESTS=$(cd "$HERE/../../../../invisible_engine_dots/tests" && pwd)
 FAKE_MCP_DIR=/usr/local/lib/smoke-fake/mcp
-install -D -m 0644 "$ENGINE_TESTS/fakes/fake_mcp_server.py" "$FAKE_MCP_DIR/fakes/fake_mcp_server.py"
-install -D -m 0644 "$ENGINE_TESTS/../nanobot/dots/invisible_playwright_mcp.json" "$(dirname "$FAKE_MCP_DIR")/nanobot/dots/invisible_playwright_mcp.json"
-FAKE_MCP=/usr/local/lib/smoke-fake/invisible-playwright-mcp
-printf '#!/bin/sh\nexec /opt/invisible-dots-engine/bin/python -I -B %s/fakes/fake_mcp_server.py "$@"\n' "$FAKE_MCP_DIR" > "$FAKE_MCP"
+for file in fake_mcp_server.py invisible_playwright_mcp.json server_package/invisible_playwright_mcp/__init__.py \
+    server_package/invisible_playwright_mcp/__main__.py server_package/invisible_playwright_mcp/mcp.py; do
+  install -D -m 0644 "$ENGINE_TESTS/fakes/$file" "$FAKE_MCP_DIR/fakes/$file"
+done
+FAKE_ENV=/usr/local/lib/smoke-fake/env
+/opt/invisible-dots-engine/bin/python -m venv --without-pip "$FAKE_ENV"
+fake_site=$("$FAKE_ENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+engine_site=$(/opt/invisible-dots-engine/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+printf '%s\n' "$FAKE_MCP_DIR/fakes" "$FAKE_MCP_DIR/fakes/server_package" "$engine_site" > "$fake_site/fake_server.pth"
+FAKE_MCP=$FAKE_ENV/bin/invisible-playwright-mcp
+printf '#!/bin/sh\nexec %s/bin/python -I -B -m invisible_playwright_mcp "$@"\n' "$FAKE_ENV" > "$FAKE_MCP"
 chmod 0755 "$FAKE_MCP"
 # --- the stand-in for an MCP server the person declares: the engine's test fake of any server, run as dot the same way ---
 install -D -m 0644 "$ENGINE_TESTS/fakes/fake_tool_server.py" "$FAKE_MCP_DIR/fakes/fake_tool_server.py"

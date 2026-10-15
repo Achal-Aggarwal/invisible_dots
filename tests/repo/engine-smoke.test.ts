@@ -105,10 +105,9 @@ describe("the engine smoke", () => {
     expect(read(join(smoke, "prepare-engine.sh"))).toContain("browser/smoke.sh");
   });
 
-  it("builds the browser smoke's browser with the image builder's own script, lock and apt packages, and runs the real server", () => {
+  it("builds the browser smoke's browser with the image builder's own script and apt packages, the newest release, and runs the real server", () => {
     const prepare = read(join(smoke, "prepare-engine.sh"));
-    expect(prepare).toContain("build-browser-env.sh");
-    expect(prepare).toContain("mcp-requirements.lock");
+    expect(prepare).toContain('bash "$builder/build-browser-env.sh" /home/dot/.local/share/invisible-dots/mcp\n');
     expect(prepare).toContain(".apt_packages[]");
     const provision = read(join(repo, "guest/image-builder/builder/provision.sh"));
     expect(provision).toContain("BROWSER_BUILD");
@@ -124,15 +123,18 @@ describe("the engine smoke", () => {
     expect(checks).toContain("pkill -9 -u dotengine");
   });
 
-  it("runs the browser seams against the engine's one MCP stand-in and the tool list captured from the pinned server", () => {
+  it("runs the browser seams against the engine's one MCP stand-in, installed the way the real server is", () => {
     const checks = read(join(smoke, "smoke.sh"));
     const lib = read(join(smoke, "lib.sh"));
     const fake = "invisible_engine_dots/tests/fakes/fake_mcp_server.py";
     expect(existsSync(join(repo, fake)), fake).toBe(true);
-    // The smoke copies that file, not a second stand-in of its own, and the engine's capture of the server it serves.
-    expect(checks).toContain("fakes/fake_mcp_server.py");
-    expect(checks).toContain("nanobot/dots/invisible_playwright_mcp.json");
-    expect(existsSync(join(repo, "invisible_engine_dots/nanobot/dots/invisible_playwright_mcp.json"))).toBe(true);
+    // The smoke copies that file, not a second stand-in of its own, with the capture it serves and the package that
+    // lets the engine read it as it reads an installed server.
+    for (const file of ["fake_mcp_server.py", "invisible_playwright_mcp.json", "server_package/invisible_playwright_mcp/mcp.py"]) {
+      expect(checks).toContain(file);
+      expect(existsSync(join(repo, "invisible_engine_dots/tests/fakes", file)), file).toBe(true);
+    }
+    expect(checks).toContain('FAKE_MCP=$FAKE_ENV/bin/invisible-playwright-mcp');
     expect(existsSync(join(smoke, "fake_mcp.py"))).toBe(false);
     // It is the program the engine runs for a browser, under the name the engine reads: lib.sh writes the
     // engine's environment, and only a smoke that sets MCP_COMMAND gives the engine a program of its own.

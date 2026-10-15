@@ -6,10 +6,10 @@ Two kinds:
   identities. Opening is explicit. A page tool on an identity that is not open does not open it, it says
   so, so `browser.identity.launch` alone decides whether a browser starts.
 * The page tools are invisible-playwright-mcp's own, offered as an MCP host offers a server's tools: the
-  server's name, description and input schema, as `invisible_playwright_mcp.json` captured them from the
-  pinned version, plus the `identity_id` that says which open identity's server the call goes to. Which of
-  the server's tools the model is offered is the permission table's (`permissions.py`); the server's
-  instructions go into the system prompt (`INSTRUCTIONS`). The server serves the identity's browser alone
+  name, description and input schema the server installed on the computer serves (`server_interface.py`, read
+  when the engine starts), plus the `identity_id` that says which open identity's server the call goes to.
+  Which of the server's tools the model is offered is the permission table's (`permissions.py`); the server's
+  instructions go into the system prompt. The server serves the identity's browser alone
   (`BROWSER_ENV["HOST_MANAGED"]`), so its tools take no `browser`.
 
 An image the server answers with is shown to the model and not stored (images.py): the tool's result is its
@@ -22,13 +22,12 @@ import base64
 import json
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.mcp import _normalize_schema_for_openai
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.dots.browser import (
-    SERVER_INTERFACE,
     BrowserIdentity,
     BrowserIdentityError,
     BrowserManager,
@@ -38,10 +37,8 @@ from nanobot.dots.browser import (
 from nanobot.dots.computer import Computer, ComputerError
 from nanobot.dots.identity_rules import IDENTITY_ID_MAX
 from nanobot.dots.images import ToolImage, current_turn_images, placeholder, show_images
+from nanobot.dots.server_interface import ServerTool
 from nanobot.dots.store import iso_from_ms
-
-# The server's instructions, which the system prompt carries as an MCP host carries them (context.py).
-INSTRUCTIONS: str = SERVER_INTERFACE["instructions"]
 
 _IDENTITY_ID = {
     "type": "string",
@@ -58,26 +55,6 @@ _OPEN_IDENTITY_ID = {
     **_IDENTITY_ID,
     "description": "The id of an open browser identity, as browser_identity_list shows it; "
     "browser_identity_launch opens one.",
-}
-
-
-@dataclass(frozen=True)
-class ServerTool:
-    """One tool of invisible-playwright-mcp as the server serves it: name, description, input schema."""
-
-    name: str
-    description: str
-    input_schema: Mapping[str, Any]
-
-
-# The server's tools by name, as captured.
-SERVER_TOOLS: Mapping[str, ServerTool] = {
-    tool["name"]: ServerTool(
-        tool["name"],
-        tool.get("description") or tool["name"],
-        tool.get("inputSchema") or {"type": "object", "properties": {}},
-    )
-    for tool in SERVER_INTERFACE["tools"]
 }
 
 
@@ -258,12 +235,24 @@ class BrowserIdentityCloseTool(_IdentityActionTool):
         return f"The browser of identity {identity_id} is closed; its profile is kept."
 
 
+def server_instructions(tools: ToolRegistry) -> str:
+    """The browser server's instructions when `tools` offers one of its page tools, else empty."""
+    for name in tools.tool_names:
+        tool = tools.get(name)
+        if isinstance(tool, BrowserPageTool):
+            return tool.server_instructions
+    return ""
+
+
 class BrowserPageTool(_BrowserTool):
     """A tool of invisible-playwright-mcp, called on the open identity the model names."""
 
-    def __init__(self, browser: BrowserManager, tool: ServerTool) -> None:
+    def __init__(self, browser: BrowserManager, tool: ServerTool, server_instructions: str) -> None:
         super().__init__(browser)
         self._tool = tool
+        # The server's instructions, which the system prompt carries as an MCP host carries them (context.py)
+        # whenever a turn offers one of its tools.
+        self.server_instructions = server_instructions
         # The server's schema as nanobot's MCP client offers any server's (`mcp.MCPToolWrapper`), with the identity
         # in front of the server's own arguments.
         schema = _normalize_schema_for_openai(dict(tool.input_schema))

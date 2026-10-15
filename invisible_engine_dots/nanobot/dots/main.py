@@ -36,6 +36,7 @@ from nanobot.dots.permissions import ToolDeps, build_registry
 from nanobot.dots.provider import OpenRouterProviders
 from nanobot.dots.secrets import KeyHolder, McpSecrets
 from nanobot.dots.server import AgentServer
+from nanobot.dots.server_interface import ServerInterface, ServerInterfaceError, read_server_interface
 from nanobot.dots.store import DotStore, StoreOwnedError
 from nanobot.utils.token_encoding import warmup_token_encoding
 
@@ -139,11 +140,13 @@ async def serve(environment: Environment, stop: asyncio.Event) -> None:
         computer = AgentdComputer(environment.agentd_bin, environment.agentd_socket, environment.workspace)
         exec_sessions = ExecSessionManager()
         cron = CronService(state_dir / "cron" / "jobs.json")
-        # The Dot's one browser: invisible-playwright-mcp, one process per open identity, run as `dot`.
+        # The Dot's one browser: invisible-playwright-mcp, one process per open identity, run as `dot`. What it tells
+        # a model is read from the server installed on this computer first: the page tools are that server's.
         browser = BrowserManager(
             store=store,
             computer=computer,
             mcp_command=environment.mcp_command,
+            interface=await _browser_interface(computer, environment.mcp_command),
             max_open=DEFAULT_MAX_OPEN,
             max_identities=DEFAULT_MAX_IDENTITIES,
         )
@@ -202,6 +205,17 @@ async def serve(environment: Environment, stop: asyncio.Event) -> None:
             await computer.aclose()
     finally:
         store.close()
+
+
+async def _browser_interface(computer: AgentdComputer, mcp_command: str) -> ServerInterface | ServerInterfaceError:
+    """The interface of the server `mcp_command` runs on this computer, or why it could not be read (logged)."""
+    try:
+        interface = await read_server_interface(computer, mcp_command)
+    except ServerInterfaceError as error:
+        logger.error("the browser server could not be read, so no browser opens: {}", error)
+        return error
+    logger.info("browser server: invisible-playwright-mcp {} serving {} tools", interface.version, len(interface.tools))
+    return interface
 
 
 async def _retry(engine: Engine) -> None:

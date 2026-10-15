@@ -9,14 +9,15 @@ import { chmod, copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { writeIso } from "@invisible-dots/iso";
 import { hostPaths, type HostPaths } from "@invisible-dots/shared";
-import { BUILDER_BROWSER_BUILD, BUILDER_ENGINE_BUILD, BUILDER_ENGINE_LOCK, BUILDER_PROVISION, BUILDER_PYTHON_LOCK, BUILDER_USER_DATA, defaultAssetRoot, readGuestAsset } from "./assets.js";
+import { BUILDER_BROWSER_BUILD, BUILDER_ENGINE_BUILD, BUILDER_ENGINE_LOCK, BUILDER_OTHER_BROWSERS, BUILDER_PROVISION, BUILDER_USER_DATA, defaultAssetRoot, readGuestAsset } from "./assets.js";
+import { latestBrowserRelease, type BrowserRelease } from "./browser-release.js";
 import { fetchVerified, sha256File, type Fetch, type FetchVerifiedOptions } from "./download.js";
 import { acquireLock, type Lock } from "./lock.js";
 import { manifestPathFor, type GoldenManifest } from "./manifest.js";
 import { BASE_IMAGE, downloadFileName, GUEST_PINS, type BaseImagePin, type GuestPins, type PinnedDownload } from "./pins.js";
 import { waitForExit, type ProcessRunner } from "./process.js";
 import { PREBUILT_RELEASES, pullPrebuiltGolden } from "./prebuilt.js";
-import { parseHashedLock, parsePythonLock, type PythonLock } from "./python-lock.js";
+import { parseHashedLock } from "./python-lock.js";
 import { builderQemuArgs, type Accelerator, type QemuPrograms } from "./qemu.js";
 import { SEED_VOLUME_ID } from "@invisible-dots/vm-manager";
 import { builderSeedEntries } from "./seed.js";
@@ -69,6 +70,8 @@ export interface GoldenBuildOptions {
   prebuilt?: string | false;
   /** Write the image as a compressed qcow2 (smaller to publish; QEMU reads it as it is). */
   compress?: boolean;
+  /** The release of the Dot's browser the image installs; the newest on the package index by default (browser-release.ts). */
+  browser?: BrowserRelease;
 }
 
 export interface GoldenBuildResult {
@@ -101,17 +104,20 @@ export async function buildGoldenImage(options: GoldenBuildOptions): Promise<Gol
 
   const userData = await readGuestAsset(assetRoot, BUILDER_USER_DATA);
   const provision = await readGuestAsset(assetRoot, BUILDER_PROVISION);
-  const pythonLock = await readGuestAsset(assetRoot, BUILDER_PYTHON_LOCK);
-  const python = parsePythonLock(pythonLock.toString("utf8"));
   const engineBuild = await readGuestAsset(assetRoot, BUILDER_ENGINE_BUILD);
   const browserBuild = await readGuestAsset(assetRoot, BUILDER_BROWSER_BUILD);
+  const otherBrowsers = await readGuestAsset(assetRoot, BUILDER_OTHER_BROWSERS);
   const engineLock = await readGuestAsset(assetRoot, BUILDER_ENGINE_LOCK);
   parseHashedLock(engineLock.toString("utf8"), BUILDER_ENGINE_LOCK);
+  // The browser is the newest release of invisible-playwright-mcp, asked of the index now: it is an input, so a new
+  // release is a new image, not the image of the last one reused or downloaded under the same name.
+  const browser = options.browser ?? (await latestBrowserRelease({ download: { ...options.download, log, ...(options.fetch ? { fetch: options.fetch } : {}) } }));
+  log(`the browser: invisible-playwright-mcp ${browser.mcp} (invisible-playwright ${browser.playwright}, invisible-core ${browser.core})`);
   // The disk size is an input: the same pins at another size are another image.
-  // The locks are too, so a changed transitive dependency is another image, and
+  // The engine's lock is too, so a changed transitive dependency is another image, and
   // so are the scripts that build the engine's environment and the browser. The engine's own
   // source is not: it travels on the runtime disk (section 3.3).
-  const digest = inputsDigest([JSON.stringify(base), JSON.stringify(pins), userData, provision, pythonLock, diskSize, engineLock, engineBuild, browserBuild]);
+  const digest = inputsDigest([JSON.stringify(base), JSON.stringify(pins), userData, provision, JSON.stringify(browser), diskSize, engineLock, engineBuild, browserBuild, otherBrowsers]);
 
   const { version, image, manifest, existing } = await resolveImageVersion({
     kind: "golden",
@@ -142,7 +148,7 @@ export async function buildGoldenImage(options: GoldenBuildOptions): Promise<Gol
     }
     return await buildLocked(
       { ...options, log, paths, base, pins, diskSize, now, lock },
-      { version, image, manifest, digest, userData, provision, pythonLock, python, engineLock, engineBuild, browserBuild },
+      { version, image, manifest, digest, userData, provision, browser, engineLock, engineBuild, browserBuild, otherBrowsers },
     );
   } finally {
     await lock.release();
@@ -167,11 +173,11 @@ interface Target {
   digest: string;
   userData: Buffer;
   provision: Buffer;
-  pythonLock: Buffer;
-  python: PythonLock;
+  browser: BrowserRelease;
   engineLock: Buffer;
   engineBuild: Buffer;
   browserBuild: Buffer;
+  otherBrowsers: Buffer;
 }
 
 async function buildLocked(options: GoldenBuildOptions & Resolved, target: Target): Promise<GoldenBuildResult> {
@@ -214,13 +220,13 @@ async function buildLocked(options: GoldenBuildOptions & Resolved, target: Targe
         pins,
         userData: target.userData,
         provision: target.provision,
-        pythonLock: target.pythonLock,
-        python: target.python,
+        browser: target.browser,
         uvTarball,
         tunnelBinary,
         engineLock: target.engineLock,
         engineBuild: target.engineBuild,
         browserBuild: target.browserBuild,
+        otherBrowsers: target.otherBrowsers,
       }),
       { volumeId: SEED_VOLUME_ID, timestamp: options.now() },
     );
@@ -250,9 +256,9 @@ async function buildLocked(options: GoldenBuildOptions & Resolved, target: Targe
       pinned: {
         uv: { version: pins.uv.version, sha256: pins.uv.sha256, url: pins.uv.url },
         tunnel: { version: pins.tunnel.version, sha256: pins.tunnel.sha256, url: pins.tunnel.url },
-        "invisible-playwright-mcp": target.python.mcpVersion,
-        "invisible-playwright": target.python.playwrightVersion,
-        "mcp-requirements.lock": createHash("sha256").update(target.pythonLock).digest("hex"),
+        "invisible-playwright-mcp": target.browser.mcp,
+        "invisible-playwright": target.browser.playwright,
+        "invisible-core": target.browser.core,
         apt_snapshot: pins.apt_snapshot,
         apt_packages: [...pins.apt_packages],
       },
