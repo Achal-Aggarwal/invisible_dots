@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fakes.fake_mcp_server import install_fake_mcp
+from fakes.fake_mcp_server import install_fake_mcp, server_interface
 
 from nanobot.dots.browser import BrowserManager
 from nanobot.dots.computer import Computer
@@ -27,6 +27,7 @@ def make_browser_manager(tmp_path: Path, store: DotStore, computer: Computer, **
         "store": store,
         "computer": computer,
         "mcp_command": str(install_fake_mcp(tmp_path / "bin")),
+        "interface": server_interface(),
         "max_open": 3,
         "max_identities": 20,
         "browsers_dir": str(tmp_path / "browsers"),

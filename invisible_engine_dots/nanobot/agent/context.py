@@ -43,7 +43,7 @@ class ContextBuilder:
         text of its MEMORY.md (what the Dot always knows); `skills` are the Dot's
         skills (nanobot/dots/skills.py), named in the prompt with their descriptions and paths.
         `browser_instructions` are invisible-playwright-mcp's own, carried as an MCP host carries a server's
-        when its page tools are offered (browser_tools.INSTRUCTIONS); empty when they are not.
+        when its page tools are offered (browser_tools.server_instructions); empty when they are not.
         `mcp_servers` are the MCP servers the person declared whose tools may be offered, each with its `name`, its
         `instructions` and, when it is not connected, the `error` that says why (nanobot/dots/mcp_servers.py).
         """

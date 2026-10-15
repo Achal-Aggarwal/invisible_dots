@@ -49,8 +49,8 @@ disk lay them out. This smoke does, in one Linux container, with no QEMU:
 The Dot's browser is `invisible-playwright-mcp`, one process per open identity, started by the
 engine through `dot-agentd`'s relay so that it runs as `dot`. The smoke installs a stand-in for it as
 `INVISIBLE_DOTS_MCP_COMMAND`: the engine's own test fake (`invisible_engine_dots/tests/fakes/fake_mcp_server.py`,
-the one owner of what a stand-in answers) on the engine's python, serving what the engine captured from
-the pinned server (`invisible_engine_dots/nanobot/dots/invisible_playwright_mcp.json`). It records its
+the one owner of what a stand-in answers) serving the fixture `tests/fakes/invisible_playwright_mcp.json`,
+installed the way the real server is, so the engine reads its tools as it reads the real server's. It records its
 environment, its working directory and every call it receives in `$INVISIBLE_MCP_HOME/record.jsonl`,
 and the checks read that file. What they pin:
 
@@ -86,8 +86,8 @@ The real server and a real Firefox are not run by this smoke: they are the brows
 
 `browser/smoke.sh` runs the Dot's real browser. The golden image's apt packages (`pins.json`:
 the desktop, Firefox's libraries, ImageMagick) are installed, the browser is built by
-`builder/build-browser-env.sh` on the hashed `builder/mcp-requirements.lock` (the MCP server's
-environment and the browser engine: the script `provision.sh` runs), the
+`builder/build-browser-env.sh` at the newest release (the MCP server's environment and the
+browser engine: the script `provision.sh` runs), the
 runtime disk's `dot-desktop` script starts Xvfb and an XFCE session on `:0` as dot, and the Dot
 runs as in the engine smoke with no stand-in for the browser: the engine finds
 `invisible-playwright-mcp` on its PATH. Only the model is a stand-in, and the pages the browser
@@ -130,7 +130,8 @@ engine) and at a launch (the egress address, for the timezone, and the library's
 ## Run it
 
 Only docker is needed, with the images `golang:1.26.8` and `ubuntu:24.04` (pulled when
-absent; the container downloads the pinned `uv` and the locked wheels).
+absent; the container downloads the pinned `uv`, the engine's locked wheels and, for the
+browser smoke, the newest browser).
 
 ```sh
 guest/image-builder/test/smoke/run.sh                  # the repository this script is in

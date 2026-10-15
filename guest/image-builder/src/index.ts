@@ -22,7 +22,8 @@ export {
   type RuntimeManifest,
 } from "./manifest.js";
 export { BASE_IMAGE, GUEST_PINS, type BaseImagePin, type GuestPins, type PinnedDownload } from "./pins.js";
-export { normalizePackageName, parseHashedLock, parsePythonLock, type PythonLock } from "./python-lock.js";
+export { normalizePackageName, parseHashedLock } from "./python-lock.js";
+export { latestBrowserRelease, type BrowserRelease } from "./browser-release.js";
 export type { ProcessRunner, RunningProcess } from "./process.js";
 export { builderQemuArgs, type Accelerator, type QemuPrograms } from "./qemu.js";
 export {

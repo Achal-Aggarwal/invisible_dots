@@ -1,37 +1,13 @@
 /**
- * The hashed locks of the golden image's Python environments: every package
- * at an exact version with the SHA-256 of its files, installed with
- * `uv pip install --require-hashes`, so nothing is resolved from the index at
- * build time (architecture section 3.3). One parser owns the rules for both.
+ * The hashed lock of the engine's Python environment, builder/engine-requirements.lock: every package at an exact
+ * version with the SHA-256 of its files, installed with `uv pip install --require-hashes`, so nothing is resolved
+ * from the index at build time (architecture section 3.3). It is the dependencies of
+ * invisible_engine_dots/pyproject.toml and what they need.
  *
- * builder/mcp-requirements.lock is the whole environment of
- * invisible-playwright-mcp. It is the one place that server's two top-level
- * versions live: they are read from it here for pins.env and the manifest,
- * never written down a second time, and the file itself is an input of the
- * golden image's digest.
- *
- * builder/engine-requirements.lock is the engine's environment: the
- * dependencies of invisible_engine_dots/pyproject.toml and what they need.
+ * The Dot's browser is not locked: the image installs the newest release (browser-release.ts).
  */
 
-/** The two packages the golden image installs on purpose; everything else in the lock is what they need. */
-export const MCP_PACKAGE = "invisible-playwright-mcp";
-export const PLAYWRIGHT_PACKAGE = "invisible-playwright";
-
-export interface PythonLock {
-  /** Every package of the environment and its exact version, by normalized name. */
-  packages: ReadonlyMap<string, string>;
-  /** The version of invisible-playwright-mcp the lock pins. */
-  mcpVersion: string;
-  /** The version of invisible-playwright the lock pins. */
-  playwrightVersion: string;
-}
-
-/**
- * Package names as PEP 503 compares them, versions restricted to what
- * pins.env carries without quoting: the two top-level versions end up in a
- * shell file inside the builder VM.
- */
+/** Package names as PEP 503 compares them, versions as the lock writes them. */
 const REQUIREMENT = /^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9][A-Za-z0-9.+_-]*) \\$/;
 const HASH = /^ {4}--hash=sha256:[0-9a-f]{64}( \\)?$/;
 
@@ -79,15 +55,4 @@ export function parseHashedLock(text: string, where: string): ReadonlyMap<string
   });
   if (current !== undefined) throw new Error(`${where}: ${current} ends without its hashes`);
   return packages;
-}
-
-/** Parse and check the MCP server's lock: the rules above, and both top-level packages pinned. */
-export function parsePythonLock(text: string, where = "builder/mcp-requirements.lock"): PythonLock {
-  const packages = parseHashedLock(text, where);
-  const mcpVersion = packages.get(MCP_PACKAGE);
-  const playwrightVersion = packages.get(PLAYWRIGHT_PACKAGE);
-  if (!mcpVersion || !playwrightVersion) {
-    throw new Error(`${where}: it must pin both ${MCP_PACKAGE} and ${PLAYWRIGHT_PACKAGE}; regenerate it as its header says`);
-  }
-  return { packages, mcpVersion, playwrightVersion };
 }

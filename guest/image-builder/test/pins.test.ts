@@ -20,7 +20,7 @@ describe("the pins in this checkout", () => {
     // The tunnel publishes no checksum list: its pinned sha256 is the only record.
     expect(GUEST_PINS.tunnel.url).toContain(`/${GUEST_PINS.tunnel.version}/`);
     expect(GUEST_PINS.tunnel.shasums_url).toBeUndefined();
-    // The Python packages are pinned, with hashes, by builder/mcp-requirements.lock alone.
+    // The Dot's browser is never pinned: the image installs the newest release (browser-release.ts).
     expect(Object.keys(GUEST_PINS)).not.toContain("python_packages");
   });
 
@@ -65,8 +65,8 @@ describe("pin validation", () => {
     expect(() => parseGuestPins(unpinned)).toThrow(/apt_snapshot/);
   });
 
-  it("refuses python_packages, which would be a second copy of the lock's versions", () => {
-    expect(() => parseGuestPins({ ...good, python_packages: { "invisible-playwright-mcp": "0.70.2" } })).toThrow(/mcp-requirements\.lock/);
+  it("refuses python_packages: the Dot's browser is the newest release, never a version written here", () => {
+    expect(() => parseGuestPins({ ...good, python_packages: { "invisible-playwright-mcp": "0.70.2" } })).toThrow(/newest release of the Dot's browser/);
   });
 
   it("rejects a base image name that is a path", () => {

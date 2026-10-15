@@ -36,13 +36,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import posixpath
 import re
 import sqlite3
 from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
@@ -59,32 +57,11 @@ from nanobot.dots.identity_rules import (
     new_identity_id,
 )
 from nanobot.dots.protocol import BROWSER_ENV, BROWSERS_DIR, GUEST_DISPLAY, MCP_HOMES_DIR
+from nanobot.dots.server_interface import ServerInterface, ServerInterfaceError
 from nanobot.dots.store import BrowserIdentityRow, DotStore
 
 # The name the private registry of one identity knows its one MCP server by.
 SERVER_NAME = "browser"
-
-# What invisible-playwright-mcp tells a model, at the version the image installs: written from the real server by
-# guest/image-builder/builder/capture-mcp-interface.py, and a test holds its version to the lock's.
-SERVER_INTERFACE: Mapping[str, Any] = json.loads(Path(__file__).with_name("invisible_playwright_mcp.json").read_bytes())
-
-# What `browser_open`'s answer starts with when the browser started: the package's OPENED for the main browser, as
-# invisible_playwright_mcp.json records it. Anything else that is not an error is the engine's download progress, and
-# it is asked again.
-_OPENED = SERVER_INTERFACE["answers"]["opened"] % SERVER_INTERFACE["browser"]
-# What the server answers when its browser closed under it while the process lives on (Firefox crashed): its
-# NOT_OPEN and GONE sentences for the main browser, as invisible_playwright_mcp.json records them from the pinned
-# package's own constants (the package lives in the MCP's own environment, so there is nothing importable here).
-# The sentence is the WHOLE error, behind the prefix FastMCP puts on what a tool raises. A phrase anywhere in
-# a longer error is not it: a failed click or select echoes text the page controls (the covering element's
-# text, the option asked for), and a page that says "the main browser is gone" must not close the identity.
-_BROWSER_LOST = re.compile(
-    r"(?:Error executing tool \w+: )?(?:"
-    + "|".join(
-        re.escape(SERVER_INTERFACE["answers"][answer] % SERVER_INTERFACE["browser"]) for answer in ("not_open", "gone")
-    )
-    + ")"
-)
 
 # Why a session ended without a close of ours, as the log says it.
 _PROCESS_ENDED = "the MCP server exited unexpectedly"
@@ -215,6 +192,7 @@ class BrowserManager:
         store: DotStore,
         computer: Computer,
         mcp_command: str,
+        interface: ServerInterface | ServerInterfaceError,
         max_open: int,
         max_identities: int,
         browsers_dir: str = BROWSERS_DIR,
@@ -252,10 +230,25 @@ class BrowserManager:
         self._unrecorded: set[_Session] = set()
         # Orders `create`, whose count check and insert are apart by the directory it makes.
         self._create_lock = asyncio.Lock()
+        # What the server `mcp_command` runs tells a model (server_interface.py), read when the engine started; or
+        # why it could not be read, and then no browser opens and the launch says that.
+        self._interface = interface if isinstance(interface, ServerInterface) else None
+        self._interface_error = (
+            "" if isinstance(interface, ServerInterface) else f"the browser server on this computer could not be read: {interface}"
+        )
 
     # ------------------------------------------------------------------
     # What callers read
     # ------------------------------------------------------------------
+
+    @property
+    def interface(self) -> ServerInterface | None:
+        """What the installed server tells a model; None when it could not be read (`interface_error` says why)."""
+        return self._interface
+
+    @property
+    def interface_error(self) -> str:
+        return self._interface_error
 
     @property
     def limits(self) -> tuple[int, int]:
@@ -349,6 +342,8 @@ class BrowserManager:
         A launch of an identity that is opening waits for that opening and shares its outcome; one of an
         identity that is closing waits for the close and then opens it.
         """
+        # Nothing is reserved or started for a server whose interface could not be read: it says why instead.
+        self._require_interface("launch_failed")
         while True:
             row = self._require(identity_id)
             session = self._sessions.get(identity_id)
@@ -568,8 +563,8 @@ class BrowserManager:
             BROWSER_ENV["PROFILE_DIR"]: profile,
             BROWSER_ENV["HEADLESS"]: "0",
             BROWSER_ENV["DISPLAY"]: self._display,
-            # invisible_core reinstalls itself from the package index when its version drifts; the image installed it
-            # from a hashed lock, and a drift has to fail loudly instead of bringing in files nobody checked.
+            # invisible_core reinstalls itself from the package index when its version drifts: the image installed
+            # the browser it was built with, and a browser changing under a running Dot has to fail loudly instead.
             BROWSER_ENV["CORE_AUTOFIX"]: "off",
             # The engine opens and closes this browser and the model has the page tools only: the server serves
             # `main` alone (no tool takes `browser`, so a caller cannot choose another) and its instructions are
@@ -691,6 +686,7 @@ class BrowserManager:
         so this asks again, waiting 2 s doubling to 30 s, until the deadline.
         """
         identity_id = session.identity_id
+        interface = self._require_interface("launch_failed")
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._open_deadline_s
         wait = self._open_retry_initial_s
@@ -703,7 +699,7 @@ class BrowserManager:
                 )
             if result_is_error(result):
                 raise BrowserIdentityError("launch_failed", f'browser_open failed for identity "{identity_id}": {text}')
-            if text.startswith(_OPENED):
+            if text.startswith(interface.opened):
                 return
             if loop.time() + wait > deadline:
                 raise BrowserIdentityError(
@@ -760,9 +756,19 @@ class BrowserManager:
         """
         await asyncio.wait({self._end_session(session, _BROWSER_GONE)})
 
-    @staticmethod
-    def _is_browser_lost(result: Any) -> bool:
-        return result_is_error(result) and _BROWSER_LOST.fullmatch(result_text(result).strip()) is not None
+    def _is_browser_lost(self, result: Any) -> bool:
+        interface = self._interface
+        return (
+            interface is not None
+            and result_is_error(result)
+            and interface.browser_lost.fullmatch(result_text(result).strip()) is not None
+        )
+
+    def _require_interface(self, code: str) -> ServerInterface:
+        """The installed server's interface; a BrowserIdentityError with `code` and the reason when there is none."""
+        if self._interface is None:
+            raise BrowserIdentityError(code, self._interface_error)
+        return self._interface
 
     async def _close_ended(self, session: _Session, why: str) -> None:
         """Close the identity of a session that cannot be used any more, and emit `closed` once."""

@@ -342,7 +342,7 @@ def test_every_browser_tool_is_served_by_invisible_playwright_mcp_and_no_other_t
         elif entry.permission in PAGE_PERMISSIONS:
             assert isinstance(tool, browser_tools.BrowserPageTool), name
             assert tool.browser is deps.browser, name
-            assert name in browser_tools.SERVER_TOOLS, f"{name} is not a tool the server has"
+            assert name in deps.browser.interface.tools, f"{name} is not a tool the server has"
         else:
             # Whatever else the table holds is no browser: not by its permission, its name or its class.
             assert not name.startswith("browser"), name

@@ -76,15 +76,18 @@ id dot >/dev/null 2>&1 || useradd --create-home --shell /bin/bash dot
 # image without it would fail at every boot, so it fails the build.
 id dotagentd >/dev/null 2>&1 || { console "the builder seed made no user dotagentd"; false; }
 
-step "installing invisible-playwright-mcp $MCP_VERSION, fetching the browser engine"
-# The whole environment comes from the hashed lock on the seed and is built as dot by the script the
-# seed carries, the one the browser smoke runs too (section 3.3): every package at the version the
-# lock names and with a file whose SHA-256 it lists, nothing resolved from the index. The engine is
-# fetched with the invisible-playwright of that environment, so the cached engine is the one the
-# server's seal expects, in ~dot/.cache/invisible-playwright.
+step "installing invisible-playwright-mcp $MCP_VERSION (invisible-playwright $PLAYWRIGHT_VERSION, invisible-core $CORE_VERSION), fetching the browser engine"
+# The release is the newest on the index when the host started the build (browser-release.ts): the three versions
+# that make it up are installed exactly, and uv resolves what they need. The environment is built as dot by the
+# script the seed carries, the one the browser smoke runs too (section 3.3), which refuses any other browser among
+# what it installed. The engine is fetched with the invisible-playwright of that environment, so the cached engine is
+# the one the server's seal expects, in ~dot/.cache/invisible-playwright.
 as_dot() { sudo -u dot -H env PATH="/home/dot/.local/bin:/usr/local/bin:/usr/bin:/bin" "$@"; }
 mcp_env=/home/dot/.local/share/invisible-dots/mcp
-bash "$payload/$BROWSER_BUILD" "$payload/$PYTHON_LOCK" "$mcp_env"
+bash "$payload/$BROWSER_BUILD" "$mcp_env" \
+  "invisible-playwright-mcp==$MCP_VERSION" "invisible-playwright==$PLAYWRIGHT_VERSION" "invisible-core==$CORE_VERSION"
+# What the environment holds, read from it: the manifest records what was installed, not what was asked for.
+installed_version() { as_dot "$mcp_env/bin/python" -c 'import sys, importlib.metadata as m; print(m.version(sys.argv[1]))' "$1"; }
 # The engine the image carries is read from the library that decides it (the seal of invisible_core: tag,
 # Firefox version, BuildID), the same facts `invisible-playwright version` prints in its engine line.
 engine_version="$(as_dot "$mcp_env/bin/python" -c 'from invisible_core import BINARY_VERSION, FIREFOX_UPSTREAM_VERSION; from invisible_core.constants import BUILD_ID; print(f"{BINARY_VERSION}  Firefox {FIREFOX_UPSTREAM_VERSION}  build {BUILD_ID}")')"
@@ -118,8 +121,9 @@ component ubuntu "$VERSION_ID"
 component kernel "$(uname -r)"
 component uv "$(/usr/local/bin/uv --version)"
 component hev-socks5-tunnel "$TUNNEL_VERSION"
-component invisible-playwright-mcp "$MCP_VERSION"
-component invisible-playwright "$PLAYWRIGHT_VERSION"
+component invisible-playwright-mcp "$(installed_version invisible-playwright-mcp)"
+component invisible-playwright "$(installed_version invisible-playwright)"
+component invisible-core "$(installed_version invisible-core)"
 component browser-engine "$engine_version"
 component engine-python "$engine_python"
 

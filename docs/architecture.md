@@ -276,17 +276,19 @@ QEMU on the same disk would corrupt it.
   code is ours to change often, so a change to it is a new ISO and not an hour
   of golden build (the engine's source is not an input of the golden digest).
   A runtime disk that needs another dependency needs a new golden image.
-- Every input of the golden image is pinned by content: the cloud image, `uv`
-  and the tunnel by SHA-256 (`virtualization/images/base.json`,
-  `guest/image-builder/pins.json`), and the whole Python environment of
-  `invisible-playwright-mcp`, transitive packages included, by
-  `guest/image-builder/builder/mcp-requirements.lock`, every package at an
-  exact version with the SHA-256 of its files. The builder installs it with
-  `uv pip install --require-hashes --only-binary :all:`, so nothing is
-  resolved from the index at build time and no package's build script runs;
-  the lock is the one place the two top-level versions are
-  written, and it is part of the inputs digest, so a changed transitive
-  package is a new image. The apt packages come from the Ubuntu archive as it
+- Every input of the golden image but the browser is pinned by content: the
+  cloud image, `uv` and the tunnel by SHA-256 (`virtualization/images/base.json`,
+  `guest/image-builder/pins.json`). The browser is never pinned: each build
+  takes the newest release of `invisible-playwright-mcp` on PyPI, with the
+  newest `invisible-playwright` it accepts and the `invisible-core` that one
+  names (`guest/image-builder/src/browser-release.ts`). The three versions are
+  part of the inputs digest, so a new release is a new image, and the image's
+  manifest records the ones installed; the scheduled run of
+  `.github/workflows/golden-image.yml` publishes that image without any change
+  to this repository. The builder installs them with
+  `uv pip install --only-binary :all:`, so no package's build script runs, and
+  refuses an environment that holds another browser (the names in
+  `guest/image-builder/builder/other-browsers.txt`). The apt packages come from the Ubuntu archive as it
   was at the moment `apt_snapshot` of `pins.json` names (snapshot.ubuntu.com,
   `apt-get --snapshot`), so they and their dependencies are the same on any day
   of the build; apt checks their signatures.
@@ -1326,11 +1328,15 @@ does not know.
 The page tools are `invisible-playwright-mcp`'s, the only browser of a Dot,
 offered as an MCP host offers a server's tools: the server's name, description
 and input schema, plus the `identity_id` of the open identity whose server the
-call goes to. The engine reads them, with the server's instructions, from
-`nanobot/dots/invisible_playwright_mcp.json`, which
-`guest/image-builder/builder/capture-mcp-interface.py` writes from the real
-server at the version the lock pins, started as the engine starts it; a test
-holds its version to the lock's. Which of the server's tools the model is
+call goes to. The engine reads them, with the server's instructions, from the
+server its Dot has, when it starts: `nanobot/dots/server_capture.py`, run as dot
+by the python of the installed `invisible-playwright-mcp`, starts the server as
+the engine starts it and prints what it answers (`nanobot/dots/server_interface.py`).
+A Dot keeps the golden image it was made from and takes every new runtime disk,
+so the engine never assumes a version of the server: it offers the tools the
+server it finds serves. A page tool that server does not serve is not offered
+(`GET /tools` says so), and a Dot whose server cannot be read offers no page
+tool, and a launch says why. Which of the server's tools the model is
 offered is the permission table's: `browser_open`, `browser_close`,
 `browser_list` and `browser_status` are the manager's (the identity tools), and
 `browser_watch` is the UI's frame. The server's instructions go into the
@@ -1801,8 +1807,8 @@ Before it serves it checks that no other engine owns the state.
   (the model cannot call `browser_open`; the launch is its way, and the one
   decision of whether a browser starts). A frame that finds the browser gone
   closes the identity the same way. "Gone" is the library's own sentence (its
-  `NOT_OPEN` and `GONE`, which `capture-mcp-interface.py` records from the pinned
-  package's constants in `nanobot/dots/invisible_playwright_mcp.json`) as the
+  `NOT_OPEN` and `GONE`, which `server_capture.py` reads from the installed
+  package's constants) as the
   whole error of the call, not a phrase inside one: a failed click or select
   echoes text the page controls, and a page that writes the sentence closes nothing. An open is known the same way:
   `browser_open`'s answer starts with the library's `OPENED`, recorded beside the two. The manager hears of the end
